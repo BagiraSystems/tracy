@@ -12,16 +12,16 @@ multiple event names, each with its own thread/GPU scope. Existing modes stay by
 
 ```
 -x, --export <file>     New mode: per-event rows to <file>, dictionary to <file>.dict.
-                        Mutually exclusive with -u, -g, -m, -p.
+                        Mutually exclusive with -u, -g, -m, -p, -t.
 -f NAME[@SCOPE]         Repeatable in -x mode; terms are OR'd. NAME may be empty
                         ("-f @gpu" = every GPU zone).
--t SCOPE                Default scope for terms without @, and for the no-filter case.
+-T SCOPE                Default scope for terms without @, and for the no-filter case.
                         SCOPE is all | cpu | gpu | <thread>. Default: all.
 -L, --no-location       Drop src_file and src_line columns.
 -c, -e, -s              Unchanged meaning; honoured in -x mode.
 ```
 
-Outside `-x`, behaviour is unchanged. Using `-L`, `-t`, more than one `-f`, or a `-f` containing
+Outside `-x`, behaviour is unchanged. Using `-L`, `-T`, more than one `-f`, or a `-f` containing
 `@` without `-x` is a usage error.
 
 ## Output
@@ -82,7 +82,7 @@ as in the other orders.
 
 ## Filtering
 
-A term splits at the first `@` into NAME and SCOPE. Missing SCOPE -> the `-t` default.
+A term splits at the first `@` into NAME and SCOPE. Missing SCOPE -> the `-T` default.
 
 - SCOPE keywords (case-insensitive): `all` (CPU on every thread + GPU), `cpu` (CPU only),
   `gpu` (GPU only).
@@ -91,7 +91,7 @@ A term splits at the first `@` into NAME and SCOPE. Missing SCOPE -> the `-t` de
 - NAME matches by substring (case-insensitive unless `-c`); empty NAME matches every name.
 - An occurrence is exported if any term matches both its name and its scope; it is emitted once
   even when several terms match.
-- No `-f` -> single implicit term with empty NAME and the `-t` scope.
+- No `-f` -> single implicit term with empty NAME and the `-T` scope.
 
 ## Code structure
 
@@ -110,7 +110,7 @@ A term splits at the first `@` into NAME and SCOPE. Missing SCOPE -> the `-t` de
 ## Verification
 
 Build, then on a real trace:
-- `-x -t cpu` vs `-u`: same row count; identical values after decoding through `.dict`.
+- `-x -T cpu` vs `-u`: same row count; identical values after decoding through `.dict`.
 - `-x -f @gpu` vs `-g`: same rows.
 - A few `@<thread>` and mixed-scope runs; `-L`; a `-s ";"` run to check the `.dict` quoting.
 

@@ -5530,6 +5530,34 @@ You can customize the output with the following command line options:
   \item \texttt{-t, -\hspace{-1.25ex} -truncated\_mean [percentile]} -- Report truncated mean; the percentile argument is optional and defaults to 90 (valid range: 1--99)
 \end{itemize}
 
+\subsection{Per-event export with a string dictionary}
+\label{csvexportdict}
+
+The \texttt{-x, -\hspace{-1.25ex} -export <file>} option switches to a separate mode intended for large traces. Instead of printing to stdout, it writes one row per zone occurrence to \texttt{<file>}, and every string (zone name, source file, thread or GPU context name, zone text) is replaced by an index into a dictionary written to \texttt{<file>.dict}. The dictionary is a two-column CSV (\texttt{index}, \texttt{string}) using the same separator; its strings are quoted so paths or texts containing the separator survive. The row columns are:
+
+\begin{itemize}
+  \item \texttt{name}, \texttt{src\_file}, \texttt{thread}, \texttt{value} -- Dictionary indices (\texttt{value} is empty when the zone has no text)
+  \item \texttt{src\_line}, \texttt{ns\_since\_start}, \texttt{exec\_time\_ns} -- Plain numbers
+  \item \texttt{gpu} -- 1 for GPU zones, 0 for CPU zones; the \texttt{thread} of a GPU zone is its GPU context name
+\end{itemize}
+
+CPU rows are listed first, then GPU rows. Unlike \texttt{-g}, GPU zones with a zero time span are included; GPU zones whose timestamps were never reported are skipped. Options specific to this mode:
+
+\begin{itemize}
+  \item \texttt{-L, -\hspace{-1.25ex} -no-location} -- Omit the \texttt{src\_file} and \texttt{src\_line} columns
+  \item \texttt{-f <name>[@<scope>]} -- May be repeated; a zone is exported if any term matches. The optional scope selects where the name is looked for: \texttt{all} (CPU zones on every thread plus GPU zones, the default), \texttt{cpu}, \texttt{gpu}, or a thread given by a substring of its name or by its numeric id. An empty name matches every zone, so \texttt{-f @gpu} exports all GPU zones
+  \item \texttt{-T, -\hspace{-1.25ex} -scope <scope>} -- Default scope for \texttt{-f} terms without an explicit \texttt{@}, and for the export of all zones when no \texttt{-f} is given
+  \item \texttt{-b, -\hspace{-1.25ex} -begin <seconds>} -- Export only events that start at or after the given time, measured from the start of the trace (the profiler's zero)
+  \item \texttt{-l, -\hspace{-1.25ex} -length <seconds>} -- Length of the exported window, counted from \texttt{-b}; an event starting inside the window is kept even if it ends outside it
+  \item \texttt{-z, -\hspace{-1.25ex} -zero} -- Shift start times so that the earliest exported event starts at zero
+  \item \texttt{-S, -\hspace{-1.25ex} -seconds} -- Emit times as floating-point seconds with nanosecond precision instead of integer nanoseconds; the columns are then named \texttt{s\_since\_start} and \texttt{exec\_time\_s}
+  \item \texttt{-o, -\hspace{-1.25ex} -order <mode>} -- Row order: \texttt{sequential} (by name, then start; the default), \texttt{interleaved} (by start), or \texttt{columns}
+\end{itemize}
+
+In the \texttt{columns} order every event type gets its own group of columns (\texttt{<name>.src\_file}, \texttt{<name>.src\_line}, \texttt{<name>.ns\_since\_start}, \texttt{<name>.exec\_time\_ns}, \texttt{<name>.thread}, \texttt{<name>.value}; the \texttt{gpu} column is dropped and a GPU zone sharing a name with a CPU zone is suffixed \texttt{@gpu}), and row $k$ holds the $k$-th occurrence of each type, with empty cells once a type runs out. The header uses the readable zone names; this layout is convenient for a handful of event types but becomes unwieldy for many.
+
+The \texttt{-c}, \texttt{-e} and \texttt{-s} options apply as in the other modes; \texttt{-u}, \texttt{-g}, \texttt{-m}, \texttt{-p} and \texttt{-t} cannot be combined with \texttt{-x}.
+
 \section{Importing external profiling data}
 \label{importingdata}
 
