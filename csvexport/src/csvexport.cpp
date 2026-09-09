@@ -44,6 +44,7 @@ void print_usage_exit(int e)
     fprintf(stderr, "Per-event export mode (mutually exclusive with -u, -g, -m, -p):\n");
     fprintf(stderr, "  -x, --export arg           Write per-event rows to arg, strings to arg.dict\n");
     fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | <thread name or id>\n");
+    fprintf(stderr, "  -F, --filter-exact arg     Like -f, but NAME must match the whole zone name\n");
     fprintf(stderr, "  -T, --scope arg            Default scope for -f terms without @ (default: all)\n");
     fprintf(stderr, "  -L, --no-location          Omit src_file and src_line columns\n");
     fprintf(stderr, "  -z, --zero                 Shift times so the earliest exported event starts at 0\n");
@@ -77,6 +78,7 @@ struct Args {
     RowOrder order = RowOrder::Sequential;
     bool export_only_flag_used = false;
     std::vector<const char*> filters;
+    std::vector<const char*> exact_filters;
 };
 
 double parse_seconds(const char* arg, const char* opt)
@@ -113,6 +115,7 @@ Args parse_args(int argc, char** argv)
         { "plot", no_argument, NULL, 'p' },
         { "truncated_mean", optional_argument, NULL, 't' },
         { "export", required_argument, NULL, 'x' },
+        { "filter-exact", required_argument, NULL, 'F' },
         { "scope", required_argument, NULL, 'T' },
         { "no-location", no_argument, NULL, 'L' },
         { "zero", no_argument, NULL, 'z' },
@@ -124,7 +127,7 @@ Args parse_args(int argc, char** argv)
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "hf:s:t:ceugmpVx:T:Lzb:l:So:", long_opts, NULL)) != -1)
+    while ((c = getopt_long(argc, argv, "hf:s:t:ceugmpVx:F:T:Lzb:l:So:", long_opts, NULL)) != -1)
     {
         switch (c)
         {
@@ -140,6 +143,10 @@ Args parse_args(int argc, char** argv)
             break;
         case 'x':
             args.export_path = optarg;
+            break;
+        case 'F':
+            args.exact_filters.push_back(optarg);
+            args.export_only_flag_used = true;
             break;
         case 'T':
             args.default_scope = optarg;
@@ -223,7 +230,7 @@ Args parse_args(int argc, char** argv)
         for (auto f : args.filters) scoped_filter |= strchr(f, '@') != nullptr;
         if (args.no_location || args.export_only_flag_used || strcmp(args.default_scope, "all") != 0 || args.filters.size() > 1 || scoped_filter)
         {
-            fprintf(stderr, "-L, -T, -z, -b, -l, -S, -o, repeated -f and NAME@SCOPE filters require -x\n");
+            fprintf(stderr, "-F, -L, -T, -z, -b, -l, -S, -o, repeated -f and NAME@SCOPE filters require -x\n");
             print_usage_exit(1);
         }
     }
@@ -431,6 +438,10 @@ int main(int argc, char** argv)
         for (auto f : args.filters)
         {
             opts.terms.push_back(ParseFilterTerm(f, defaultScope));
+        }
+        for (auto f : args.exact_filters)
+        {
+            opts.terms.push_back(ParseFilterTerm(f, defaultScope, true));
         }
         if (opts.terms.empty())
         {

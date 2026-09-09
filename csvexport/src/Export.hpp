@@ -19,11 +19,13 @@ struct Scope
     std::string threadName;
 };
 
-// One "-f NAME[@SCOPE]" term. An empty name matches every zone name.
+// One "-f NAME[@SCOPE]" (substring) or "-F NAME[@SCOPE]" (whole name) term.
+// An empty name matches every zone name.
 struct FilterTerm
 {
     std::string name;
     Scope scope;
+    bool exact = false;
 };
 
 enum class RowOrder
@@ -55,7 +57,7 @@ bool IsSubstring( const char* term, const char* s, bool caseSensitive );
 Scope ParseScope( const char* spec );
 
 // Splits at the first '@'; a missing scope falls back to defaultScope.
-FilterTerm ParseFilterTerm( const char* term, const Scope& defaultScope );
+FilterTerm ParseFilterTerm( const char* term, const Scope& defaultScope, bool exact = false );
 
 // "sequential" | "interleaved" | "columns" (case-insensitive). Returns false on anything else.
 bool ParseRowOrder( const char* spec, RowOrder& out );

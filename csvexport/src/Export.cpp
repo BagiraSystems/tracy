@@ -105,7 +105,9 @@ const char* GetZoneName( const tracy::Worker& worker, int16_t srcloc )
 
 bool NameMatches( const FilterTerm& term, const char* name, bool caseSensitive )
 {
-    return term.name.empty() || IsSubstring( term.name.c_str(), name, caseSensitive );
+    if( term.name.empty() ) return true;
+    if( !term.exact ) return IsSubstring( term.name.c_str(), name, caseSensitive );
+    return caseSensitive ? term.name == name : EqualsIgnoreCase( term.name.c_str(), name );
 }
 
 bool ThreadMatches( const Scope& scope, const tracy::Worker& worker, uint16_t threadIdx, bool caseSensitive )
@@ -465,9 +467,10 @@ Scope ParseScope( const char* spec )
     return scope;
 }
 
-FilterTerm ParseFilterTerm( const char* term, const Scope& defaultScope )
+FilterTerm ParseFilterTerm( const char* term, const Scope& defaultScope, bool exact )
 {
     FilterTerm out;
+    out.exact = exact;
     const char* at = strchr( term, '@' );
     if( at )
     {

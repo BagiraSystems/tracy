@@ -5546,6 +5546,7 @@ CPU rows are listed first, then GPU rows. Unlike \texttt{-g}, GPU zones with a z
 \begin{itemize}
   \item \texttt{-L, -\hspace{-1.25ex} -no-location} -- Omit the \texttt{src\_file} and \texttt{src\_line} columns
   \item \texttt{-f <name>[@<scope>]} -- May be repeated; a zone is exported if any term matches. The optional scope selects where the name is looked for: \texttt{all} (CPU zones on every thread plus GPU zones, the default), \texttt{cpu}, \texttt{gpu}, or a thread given by a substring of its name or by its numeric id. An empty name matches every zone, so \texttt{-f @gpu} exports all GPU zones
+  \item \texttt{-F, -\hspace{-1.25ex} -filter-exact <name>[@<scope>]} -- Like \texttt{-f}, but the name must match the whole zone name rather than a substring; both kinds of terms can be mixed in one run
   \item \texttt{-T, -\hspace{-1.25ex} -scope <scope>} -- Default scope for \texttt{-f} terms without an explicit \texttt{@}, and for the export of all zones when no \texttt{-f} is given
   \item \texttt{-b, -\hspace{-1.25ex} -begin <seconds>} -- Export only events that start at or after the given time, measured from the start of the trace (the profiler's zero)
   \item \texttt{-l, -\hspace{-1.25ex} -length <seconds>} -- Length of the exported window, counted from \texttt{-b}; an event starting inside the window is kept even if it ends outside it

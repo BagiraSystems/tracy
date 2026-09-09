@@ -15,6 +15,7 @@ multiple event names, each with its own thread/GPU scope. Existing modes stay by
                         Mutually exclusive with -u, -g, -m, -p, -t.
 -f NAME[@SCOPE]         Repeatable in -x mode; terms are OR'd. NAME may be empty
                         ("-f @gpu" = every GPU zone).
+-F NAME[@SCOPE]         Like -f, but NAME must equal the whole zone name. Mixable with -f.
 -T SCOPE                Default scope for terms without @, and for the no-filter case.
                         SCOPE is all | cpu | gpu | <thread>. Default: all.
 -L, --no-location       Drop src_file and src_line columns.
@@ -88,7 +89,8 @@ A term splits at the first `@` into NAME and SCOPE. Missing SCOPE -> the `-T` de
   `gpu` (GPU only).
 - Any other SCOPE is a thread spec: all digits -> exact OS thread id; otherwise substring match
   on the thread name, case-insensitive unless `-c`.
-- NAME matches by substring (case-insensitive unless `-c`); empty NAME matches every name.
+- `-f` NAME matches by substring, `-F` NAME by whole-name equality (both case-insensitive unless
+  `-c`); empty NAME matches every name.
 - An occurrence is exported if any term matches both its name and its scope; it is emitted once
   even when several terms match.
 - No `-f` -> single implicit term with empty NAME and the `-T` scope.
