@@ -85,16 +85,19 @@ private:
 
 // One exported zone occurrence. String pointers refer to worker-owned storage (or the
 // context-name pool in Collector), so they stay valid until the export finishes.
+enum class RowKind { Cpu, Gpu, Frame };
+
 struct Row
 {
     const char* name;
-    const char* file;
+    const char* file;       // nullptr = no source location (frames)
     uint32_t line;
     int64_t start;
     int64_t duration;
-    const char* thread;
+    const char* thread;     // nullptr = no thread (frames)
     const char* value;      // nullptr = no zone text
-    bool gpu;
+    int64_t frame;          // frame number for RowKind::Frame, -1 otherwise
+    RowKind kind;
 };
 
 const char* GetZoneName( const tracy::Worker& worker, int16_t srcloc )
@@ -141,6 +144,7 @@ bool AnyCpuScope( const std::vector<const FilterTerm*>& terms, const tracy::Work
             if( ThreadMatches( term->scope, worker, threadIdx, caseSensitive ) ) return true;
             break;
         case Scope::Kind::Gpu:
+        case Scope::Kind::Frames:
             break;
         }
     }
@@ -152,6 +156,15 @@ bool AnyGpuScope( const std::vector<const FilterTerm*>& terms )
     for( auto term : terms )
     {
         if( term->scope.kind == Scope::Kind::All || term->scope.kind == Scope::Kind::Gpu ) return true;
+    }
+    return false;
+}
+
+bool AnyFramesScope( const std::vector<const FilterTerm*>& terms )
+{
+    for( auto term : terms )
+    {
+        if( term->scope.kind == Scope::Kind::Frames ) return true;
     }
     return false;
 }
@@ -194,6 +207,7 @@ public:
     {
         CollectCpu();
         CollectGpu();
+        CollectFrames();
         return m_rows;
     }
 
@@ -228,7 +242,7 @@ private:
                 }
 
                 const auto threadName = m_worker.GetThreadName( m_worker.DecompressThread( ztd.Thread() ) );
-                Push( slz.first, zone.Start(), duration, threadName, false, text );
+                Push( slz.first, zone.Start(), duration, threadName, RowKind::Cpu, text );
             }
         }
     }
@@ -250,8 +264,7 @@ private:
             }
             else
             {
-                m_ctxNames.push_back( "GPU context " + std::to_string( ctxIdx ) );
-                ctxName = m_ctxNames.back().c_str();
+                ctxName = Pool( "GPU context " + std::to_string( ctxIdx ) );
             }
             ++ctxIdx;
             for( const auto& td : ctx->threadData )
@@ -271,7 +284,7 @@ private:
                 const auto terms = TermsForName( m_opts, GetZoneName( m_worker, ev.SrcLoc() ) );
                 if( !terms.empty() && AnyGpuScope( terms ) )
                 {
-                    Push( ev.SrcLoc(), ev.GpuStart(), ev.GpuEnd() - ev.GpuStart(), ctxName, true, nullptr );
+                    Push( ev.SrcLoc(), ev.GpuStart(), ev.GpuEnd() - ev.GpuStart(), ctxName, RowKind::Gpu, nullptr );
                 }
             }
             if( ev.Child() >= 0 ) CollectGpuTimeline( ctxName, m_worker.GetGpuChildren( ev.Child() ) );
@@ -287,17 +300,54 @@ private:
         }
     }
 
-    void Push( int16_t srcloc, int64_t start, int64_t duration, const char* thread, bool gpu, const char* value )
+    // One row per frame of every matching frame set, numbered as the profiler displays them;
+    // frame length is the distance to the next frame's begin.
+    void CollectFrames()
+    {
+        bool anyFrames = false;
+        for( const auto& term : m_opts.terms ) anyFrames |= term.scope.kind == Scope::Kind::Frames;
+        if( !anyFrames ) return;
+
+        for( const auto fd : m_worker.GetFrames() )
+        {
+            const char* name = m_worker.GetString( fd->name );
+            const auto terms = TermsForName( m_opts, name );
+            if( terms.empty() || !AnyFramesScope( terms ) ) continue;
+
+            // Same numbering as the profiler's View::GetFrameNumber.
+            const auto offset = m_worker.GetFrameOffset();
+            const uint64_t numberBase = fd != m_worker.GetFramesBase() ? 1 : offset == 0 ? 0 : offset - 1;
+            // On-demand traces start with placeholder frames from before the connection; the
+            // profiler's timeline (GetFirstTime) begins after them, so they are skipped here too.
+            const auto firstTime = m_worker.GetFirstTime();
+            const auto count = m_worker.GetFrameCount( *fd );
+            for( size_t i = 0; i < count; ++i )
+            {
+                const auto begin = m_worker.GetFrameBegin( *fd, i );
+                if( begin < firstTime || !InWindow( begin ) ) continue;
+                m_rows.push_back( Row { name, nullptr, 0, begin, m_worker.GetFrameTime( *fd, i ), nullptr, nullptr, int64_t( numberBase + i ), RowKind::Frame } );
+            }
+        }
+    }
+
+    void Push( int16_t srcloc, int64_t start, int64_t duration, const char* thread, RowKind kind, const char* value )
     {
         const auto& sl = m_worker.GetSourceLocation( srcloc );
-        m_rows.push_back( Row { GetZoneName( m_worker, srcloc ), m_worker.GetString( sl.file ), sl.line, start, duration, thread, value, gpu } );
+        m_rows.push_back( Row { GetZoneName( m_worker, srcloc ), m_worker.GetString( sl.file ), sl.line, start, duration, thread, value, -1, kind } );
+    }
+
+    // Strings not owned by the worker live here so Row pointers stay valid until the export ends.
+    const char* Pool( std::string s )
+    {
+        m_pool.push_back( std::move( s ) );
+        return m_pool.back().c_str();
     }
 
     const tracy::Worker& m_worker;
     const ExportOptions& m_opts;
     int64_t m_windowBegin;
     int64_t m_windowEnd;
-    std::deque<std::string> m_ctxNames;
+    std::deque<std::string> m_pool;
     std::vector<Row> m_rows;
 };
 
@@ -305,7 +355,7 @@ bool ByNameThenStart( const Row& a, const Row& b )
 {
     const int c = strcmp( a.name, b.name );
     if( c != 0 ) return c < 0;
-    if( a.gpu != b.gpu ) return !a.gpu;
+    if( a.kind != b.kind ) return a.kind < b.kind;
     return a.start < b.start;
 }
 
@@ -321,28 +371,40 @@ public:
     Writer( FILE* f, const ExportOptions& opts, Dictionary& dict )
         : m_f( f ), m_opts( opts ), m_dict( dict ), m_sep( opts.separator )
     {
+        for( const auto& term : opts.terms ) m_hasFrames |= term.scope.kind == Scope::Kind::Frames;
     }
 
+    // The frame column exists only when frame sets were requested, so zone-only exports keep
+    // their schema.
     void WriteFlat( const std::vector<Row>& rows )
     {
         fprintf( m_f, "name%s", m_sep );
         if( !m_opts.noLocation ) fprintf( m_f, "src_file%ssrc_line%s", m_sep, m_sep );
-        fprintf( m_f, "%s%s%s%sthread%sgpu%svalue\n", StartHeader(), m_sep, DurationHeader(), m_sep, m_sep, m_sep );
+        fprintf( m_f, "%s%s%s%sthread%sgpu%svalue", StartHeader(), m_sep, DurationHeader(), m_sep, m_sep, m_sep );
+        if( m_hasFrames ) fprintf( m_f, "%sframe", m_sep );
+        fputc( '\n', m_f );
 
         for( const auto& row : rows )
         {
             fprintf( m_f, "%u%s", m_dict.Index( row.name ), m_sep );
-            if( !m_opts.noLocation ) fprintf( m_f, "%u%s%u%s", m_dict.Index( row.file ), m_sep, row.line, m_sep );
+            if( !m_opts.noLocation ) WriteLocation( row );
             WriteTime( row.start );
             fputs( m_sep, m_f );
             WriteTime( row.duration );
-            fprintf( m_f, "%s%u%s%d%s", m_sep, m_dict.Index( row.thread ), m_sep, row.gpu ? 1 : 0, m_sep );
-            WriteValue( row.value );
+            fputs( m_sep, m_f );
+            WriteIndex( row.thread );
+            fprintf( m_f, "%s%d%s", m_sep, row.kind == RowKind::Gpu ? 1 : 0, m_sep );
+            WriteIndex( row.value );
+            if( m_hasFrames )
+            {
+                fputs( m_sep, m_f );
+                WriteFrame( row );
+            }
             fputc( '\n', m_f );
         }
     }
 
-    // rows must already be sorted by name, gpu, start.
+    // rows must already be sorted by name, kind, start.
     void WriteColumns( const std::vector<Row>& rows )
     {
         struct Group { std::string key; size_t begin, end; };
@@ -350,20 +412,23 @@ public:
         for( size_t i = 0; i < rows.size(); )
         {
             size_t j = i;
-            while( j < rows.size() && strcmp( rows[j].name, rows[i].name ) == 0 && rows[j].gpu == rows[i].gpu ) ++j;
+            while( j < rows.size() && strcmp( rows[j].name, rows[i].name ) == 0 && rows[j].kind == rows[i].kind ) ++j;
             groups.push_back( Group { rows[i].name, i, j } );
             i = j;
         }
-        // A GPU zone sharing its name with a CPU zone gets a distinguishing suffix.
+        // Groups of another kind sharing a name with a preceding group get a distinguishing suffix.
         for( size_t g = 1; g < groups.size(); ++g )
         {
-            if( groups[g].key == groups[g-1].key ) groups[g].key += "@gpu";
+            if( groups[g].key != groups[g-1].key ) continue;
+            groups[g].key += rows[groups[g].begin].kind == RowKind::Gpu ? "@gpu" : "@frames";
         }
 
         bool first = true;
         for( const auto& g : groups )
         {
-            const char* cols[] = { "src_file", "src_line", StartHeader(), DurationHeader(), "thread", "value" };
+            // Frame groups carry the frame number where zone groups carry the zone text.
+            const bool frames = rows[g.begin].kind == RowKind::Frame;
+            const char* cols[] = { "src_file", "src_line", StartHeader(), DurationHeader(), "thread", frames ? "frame" : "value" };
             for( size_t c = m_opts.noLocation ? 2 : 0; c < 6; ++c )
             {
                 if( !first ) fputs( m_sep, m_f );
@@ -390,18 +455,52 @@ public:
                     continue;
                 }
                 const auto& row = rows[g.begin + k];
-                if( !m_opts.noLocation ) fprintf( m_f, "%u%s%u%s", m_dict.Index( row.file ), m_sep, row.line, m_sep );
+                if( !m_opts.noLocation ) WriteLocation( row );
                 WriteTime( row.start );
                 fputs( m_sep, m_f );
                 WriteTime( row.duration );
-                fprintf( m_f, "%s%u%s", m_sep, m_dict.Index( row.thread ), m_sep );
-                WriteValue( row.value );
+                fputs( m_sep, m_f );
+                WriteIndex( row.thread );
+                fputs( m_sep, m_f );
+                if( row.kind == RowKind::Frame )
+                {
+                    WriteFrame( row );
+                }
+                else
+                {
+                    WriteIndex( row.value );
+                }
             }
             fputc( '\n', m_f );
         }
     }
 
 private:
+    // Frame number as a plain number, or an empty cell for zone rows.
+    void WriteFrame( const Row& row )
+    {
+        if( row.frame >= 0 ) fprintf( m_f, "%lld", (long long)row.frame );
+    }
+
+    // "src_file<sep>src_line<sep>"; both cells empty when the row has no source location.
+    void WriteLocation( const Row& row )
+    {
+        if( row.file )
+        {
+            fprintf( m_f, "%u%s%u%s", m_dict.Index( row.file ), m_sep, row.line, m_sep );
+        }
+        else
+        {
+            fprintf( m_f, "%s%s", m_sep, m_sep );
+        }
+    }
+
+    // Dictionary index of s, or an empty cell for nullptr.
+    void WriteIndex( const char* s )
+    {
+        if( s ) fprintf( m_f, "%u", m_dict.Index( s ) );
+    }
+
     const char* StartHeader() const { return m_opts.seconds ? "s_since_start" : "ns_since_start"; }
     const char* DurationHeader() const { return m_opts.seconds ? "exec_time_s" : "exec_time_ns"; }
 
@@ -417,15 +516,11 @@ private:
         }
     }
 
-    void WriteValue( const char* value )
-    {
-        if( value ) fprintf( m_f, "%u", m_dict.Index( value ) );
-    }
-
     FILE* m_f;
     const ExportOptions& m_opts;
     Dictionary& m_dict;
     const char* m_sep;
+    bool m_hasFrames = false;
 };
 
 }
@@ -450,6 +545,10 @@ Scope ParseScope( const char* spec )
     else if( EqualsIgnoreCase( spec, "gpu" ) )
     {
         scope.kind = Scope::Kind::Gpu;
+    }
+    else if( EqualsIgnoreCase( spec, "frames" ) )
+    {
+        scope.kind = Scope::Kind::Frames;
     }
     else
     {

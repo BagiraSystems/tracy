@@ -43,7 +43,8 @@ void print_usage_exit(int e)
     fprintf(stderr, "\n");
     fprintf(stderr, "Per-event export mode (mutually exclusive with -u, -g, -m, -p):\n");
     fprintf(stderr, "  -x, --export arg           Write per-event rows to arg, strings to arg.dict\n");
-    fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | <thread name or id>\n");
+    fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | frames | <thread name or id>\n");
+    fprintf(stderr, "                             (frames = FrameMark frame sets; adds a numeric frame column)\n");
     fprintf(stderr, "  -F, --filter-exact arg     Like -f, but NAME must match the whole zone name\n");
     fprintf(stderr, "  -T, --scope arg            Default scope for -f terms without @ (default: all)\n");
     fprintf(stderr, "  -L, --no-location          Omit src_file and src_line columns\n");

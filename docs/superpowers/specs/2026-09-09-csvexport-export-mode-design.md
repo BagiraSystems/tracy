@@ -17,7 +17,7 @@ multiple event names, each with its own thread/GPU scope. Existing modes stay by
                         ("-f @gpu" = every GPU zone).
 -F NAME[@SCOPE]         Like -f, but NAME must equal the whole zone name. Mixable with -f.
 -T SCOPE                Default scope for terms without @, and for the no-filter case.
-                        SCOPE is all | cpu | gpu | <thread>. Default: all.
+                        SCOPE is all | cpu | gpu | frames | <thread>. Default: all.
 -L, --no-location       Drop src_file and src_line columns.
 -c, -e, -s              Unchanged meaning; honoured in -x mode.
 ```
@@ -86,6 +86,10 @@ as in the other orders.
 A term splits at the first `@` into NAME and SCOPE. Missing SCOPE -> the `-T` default.
 
 - SCOPE keywords (case-insensitive): `all` (CPU on every thread + GPU), `cpu` (CPU only),
+  `frames` (FrameMark frame sets: name = frame set name, one row per frame with begin time and
+  length, empty location and thread cells, and a numeric `frame` column - present only when a
+  `frames` term is used, replacing `value` for frame groups in `columns` order - holding the
+  frame number as the profiler shows it),
   `gpu` (GPU only).
 - Any other SCOPE is a thread spec: all digits -> exact OS thread id; otherwise substring match
   on the thread name, case-insensitive unless `-c`.
