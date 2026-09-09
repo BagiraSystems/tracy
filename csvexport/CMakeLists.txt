@@ -19,6 +19,8 @@ include(${CMAKE_CURRENT_LIST_DIR}/../cmake/GitRef.cmake)
 
 set(PROGRAM_FILES
     src/csvexport.cpp
+    src/Export.cpp
+    src/Export.hpp
 )
 
 add_executable(${PROJECT_NAME} ${PROGRAM_FILES} ${COMMON_FILES} ${SERVER_FILES})

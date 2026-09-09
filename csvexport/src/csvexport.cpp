@@ -12,12 +12,15 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
 #include "../../server/TracyFileRead.hpp"
 #include "../../server/TracyWorker.hpp"
 #include "../../getopt/getopt.h"
 #include "../../public/common/TracyVersion.hpp"
 #include "GitRef.hpp"
+#include "Export.hpp"
 
 void print_usage_exit(int e)
 {
@@ -37,22 +40,56 @@ void print_usage_exit(int e)
     fprintf(stderr, "  -m, --messages             Report only messages\n");
     fprintf(stderr, "  -p, --plot                 Report plot data (only with -u)\n");
     fprintf(stderr, "  -t, --truncated_mean[=arg] Report truncated mean (arg is the percentile. Default is 90)\n");
+    fprintf(stderr, "\n");
+    fprintf(stderr, "Per-event export mode (mutually exclusive with -u, -g, -m, -p):\n");
+    fprintf(stderr, "  -x, --export arg           Write per-event rows to arg, strings to arg.dict\n");
+    fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | <thread name or id>\n");
+    fprintf(stderr, "  -T, --scope arg            Default scope for -f terms without @ (default: all)\n");
+    fprintf(stderr, "  -L, --no-location          Omit src_file and src_line columns\n");
+    fprintf(stderr, "  -z, --zero                 Shift times so the earliest exported event starts at 0\n");
+    fprintf(stderr, "  -b, --begin arg            Export only events starting arg seconds after the trace start\n");
+    fprintf(stderr, "  -l, --length arg           Length of the exported window in seconds (default: unbounded)\n");
+    fprintf(stderr, "  -S, --seconds              Emit times as floating-point seconds instead of integer ns\n");
+    fprintf(stderr, "  -o, --order arg            Row order: sequential (default) | interleaved | columns\n");
 
     exit(e);
 }
 
 struct Args {
-    const char* filter;
-    const char* separator;
-    const char* trace_file;
-    bool case_sensitive;
-    bool self_time;
-    bool unwrap;
-    bool show_gpu;
-    bool unwrapMessages;
-    bool plot;
-    int truncated_mean_percentile;
+    const char* filter = "";
+    const char* separator = ",";
+    const char* trace_file = "";
+    bool case_sensitive = false;
+    bool self_time = false;
+    bool unwrap = false;
+    bool show_gpu = false;
+    bool unwrapMessages = false;
+    bool plot = false;
+    int truncated_mean_percentile = 0;
+    // -x mode
+    const char* export_path = nullptr;
+    const char* default_scope = "all";
+    bool no_location = false;
+    bool zero_shift = false;
+    bool seconds = false;
+    double begin_sec = 0;
+    double length_sec = -1;
+    RowOrder order = RowOrder::Sequential;
+    bool export_only_flag_used = false;
+    std::vector<const char*> filters;
 };
+
+double parse_seconds(const char* arg, const char* opt)
+{
+    char* end = nullptr;
+    const double v = strtod(arg, &end);
+    if (end == arg || *end != '\0' || v < 0)
+    {
+        fprintf(stderr, "%s expects a non-negative number of seconds, got '%s'\n", opt, arg);
+        print_usage_exit(1);
+    }
+    return v;
+}
 
 Args parse_args(int argc, char** argv)
 {
@@ -61,7 +98,7 @@ Args parse_args(int argc, char** argv)
         print_usage_exit(1);
     }
 
-    Args args = { "", ",", "", false, false, false, false, false, false, 0};
+    Args args;
 
     struct option long_opts[] = {
         { "help", no_argument, NULL, 'h' },
@@ -75,11 +112,19 @@ Args parse_args(int argc, char** argv)
         { "messages", no_argument, NULL, 'm' },
         { "plot", no_argument, NULL, 'p' },
         { "truncated_mean", optional_argument, NULL, 't' },
+        { "export", required_argument, NULL, 'x' },
+        { "scope", required_argument, NULL, 'T' },
+        { "no-location", no_argument, NULL, 'L' },
+        { "zero", no_argument, NULL, 'z' },
+        { "begin", required_argument, NULL, 'b' },
+        { "length", required_argument, NULL, 'l' },
+        { "seconds", no_argument, NULL, 'S' },
+        { "order", required_argument, NULL, 'o' },
         { NULL, 0, NULL, 0 }
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "hf:s:t:ceugmpV", long_opts, NULL)) != -1)
+    while ((c = getopt_long(argc, argv, "hf:s:t:ceugmpVx:T:Lzb:l:So:", long_opts, NULL)) != -1)
     {
         switch (c)
         {
@@ -91,6 +136,40 @@ Args parse_args(int argc, char** argv)
             exit( 0 );
         case 'f':
             args.filter = optarg;
+            args.filters.push_back(optarg);
+            break;
+        case 'x':
+            args.export_path = optarg;
+            break;
+        case 'T':
+            args.default_scope = optarg;
+            break;
+        case 'L':
+            args.no_location = true;
+            break;
+        case 'z':
+            args.zero_shift = true;
+            args.export_only_flag_used = true;
+            break;
+        case 'b':
+            args.begin_sec = parse_seconds(optarg, "-b");
+            args.export_only_flag_used = true;
+            break;
+        case 'l':
+            args.length_sec = parse_seconds(optarg, "-l");
+            args.export_only_flag_used = true;
+            break;
+        case 'S':
+            args.seconds = true;
+            args.export_only_flag_used = true;
+            break;
+        case 'o':
+            if (!ParseRowOrder(optarg, args.order))
+            {
+                fprintf(stderr, "-o expects sequential, interleaved or columns, got '%s'\n", optarg);
+                print_usage_exit(1);
+            }
+            args.export_only_flag_used = true;
             break;
         case 's':
             args.separator = optarg;
@@ -128,6 +207,26 @@ Args parse_args(int argc, char** argv)
     }
 
     args.trace_file = argv[optind];
+
+    if (args.export_path)
+    {
+        if (args.unwrap || args.show_gpu || args.unwrapMessages || args.plot || args.truncated_mean_percentile)
+        {
+            fprintf(stderr, "-x cannot be combined with -u, -g, -m, -p or -t\n");
+            print_usage_exit(1);
+        }
+    }
+    else
+    {
+        // The pre-existing modes keep their single-substring filter semantics.
+        bool scoped_filter = false;
+        for (auto f : args.filters) scoped_filter |= strchr(f, '@') != nullptr;
+        if (args.no_location || args.export_only_flag_used || strcmp(args.default_scope, "all") != 0 || args.filters.size() > 1 || scoped_filter)
+        {
+            fprintf(stderr, "-L, -T, -z, -b, -l, -S, -o, repeated -f and NAME@SCOPE filters require -x\n");
+            print_usage_exit(1);
+        }
+    }
 
     return args;
 }
@@ -312,6 +411,33 @@ int main(int argc, char** argv)
     while (!worker.AreSourceLocationZonesReady())
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+
+    if (args.export_path)
+    {
+        ExportOptions opts;
+        opts.outputPath = args.export_path;
+        opts.separator = args.separator;
+        opts.caseSensitive = args.case_sensitive;
+        opts.selfTime = args.self_time;
+        opts.noLocation = args.no_location;
+        opts.zeroShift = args.zero_shift;
+        opts.seconds = args.seconds;
+        opts.beginSec = args.begin_sec;
+        opts.lengthSec = args.length_sec;
+        opts.order = args.order;
+
+        const Scope defaultScope = ParseScope(args.default_scope);
+        for (auto f : args.filters)
+        {
+            opts.terms.push_back(ParseFilterTerm(f, defaultScope));
+        }
+        if (opts.terms.empty())
+        {
+            opts.terms.push_back(ParseFilterTerm("", defaultScope));
+        }
+
+        return RunExport(worker, opts);
     }
 
     if (args.show_gpu)
