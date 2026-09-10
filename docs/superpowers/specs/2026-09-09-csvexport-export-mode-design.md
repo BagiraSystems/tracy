@@ -69,6 +69,13 @@ quotes and newlines in paths/texts survive. Written after the CSV is complete.
 -E, --end-frame <n>     Last frame included; alternative to -n. The frame window (-B/-n/-E) is
                         exclusive with the time window (-b/-l); frame numbers outside the trace
                         are an error, a count running past the last frame ends at the trace end.
+-P, --parent <name>     Add a parent_<start column> column: start of the nearest enclosing GPU
+                        zone named exactly <name> (case per -c), same units and -z shift as the
+                        start column, so it joins to that zone's own row. Empty when there is no
+                        such ancestor; CPU zones and frames never get one. Zones with a parent
+                        follow the parent's window membership (a parent is exported with all its
+                        children or not at all). In columns order every
+                        group gets a <type>.parent_... column.
 -S, --seconds           Emit times as floating-point seconds with 9 decimals; the columns are
                         then named s_since_start / exec_time_s. Default nanosecond integers.
 -o, --order <mode>      sequential (name, then start; default) | interleaved (start) | columns.

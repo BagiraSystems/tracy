@@ -59,6 +59,8 @@ void print_usage_exit(int e)
     fprintf(stderr, "                             not a 0-based index; the trace usually does not start at frame 0\n");
     fprintf(stderr, "  -n, --frames arg           Window length in frames\n");
     fprintf(stderr, "  -E, --end-frame arg        Last frame included in the window (alternative to -n), same numbering\n");
+    fprintf(stderr, "  -P, --parent arg           Add a parent_ns_since_start column: start of the nearest enclosing\n");
+    fprintf(stderr, "                             GPU zone named exactly arg (join key to that zone's own row)\n");
     fprintf(stderr, "  -S, --seconds              Emit times as floating-point seconds instead of integer ns\n");
     fprintf(stderr, "  -o, --order arg            Row order: sequential (default) | interleaved | columns\n");
 
@@ -87,6 +89,7 @@ struct Args {
     int64_t begin_frame = -1;
     int64_t frame_count = -1;
     int64_t end_frame = -1;
+    const char* parent = "";
     RowOrder order = RowOrder::Sequential;
     bool export_only_flag_used = false;
     std::vector<const char*> filters;
@@ -148,13 +151,14 @@ Args parse_args(int argc, char** argv)
         { "begin-frame", required_argument, NULL, 'B' },
         { "frames", required_argument, NULL, 'n' },
         { "end-frame", required_argument, NULL, 'E' },
+        { "parent", required_argument, NULL, 'P' },
         { "seconds", no_argument, NULL, 'S' },
         { "order", required_argument, NULL, 'o' },
         { NULL, 0, NULL, 0 }
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "hf:s:t:ceugmpVx:F:T:Lzb:l:B:n:E:So:", long_opts, NULL)) != -1)
+    while ((c = getopt_long(argc, argv, "hf:s:t:ceugmpVx:F:T:Lzb:l:B:n:E:P:So:", long_opts, NULL)) != -1)
     {
         switch (c)
         {
@@ -203,6 +207,10 @@ Args parse_args(int argc, char** argv)
             break;
         case 'E':
             args.end_frame = parse_frame(optarg, "-E");
+            args.export_only_flag_used = true;
+            break;
+        case 'P':
+            args.parent = optarg;
             args.export_only_flag_used = true;
             break;
         case 'S':
@@ -280,7 +288,7 @@ Args parse_args(int argc, char** argv)
         for (auto f : args.filters) scoped_filter |= strchr(f, '@') != nullptr;
         if (args.no_location || args.export_only_flag_used || strcmp(args.default_scope, "all") != 0 || args.filters.size() > 1 || scoped_filter)
         {
-            fprintf(stderr, "-F, -L, -T, -z, -b, -l, -B, -n, -E, -S, -o, repeated -f and NAME@SCOPE filters require -x\n");
+            fprintf(stderr, "-F, -L, -T, -z, -b, -l, -B, -n, -E, -P, -S, -o, repeated -f and NAME@SCOPE filters require -x\n");
             print_usage_exit(1);
         }
     }
@@ -485,6 +493,7 @@ int main(int argc, char** argv)
         opts.beginFrame = args.begin_frame;
         opts.frameCount = args.frame_count;
         opts.endFrame = args.end_frame;
+        opts.parentName = args.parent;
         opts.order = args.order;
 
         const Scope defaultScope = ParseScope(args.default_scope);

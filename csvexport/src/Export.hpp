@@ -51,6 +51,9 @@ struct ExportOptions
     int64_t beginFrame = -1;
     int64_t frameCount = -1;
     int64_t endFrame = -1;
+    // Non-empty: add a parent_start column with the start of the nearest enclosing zone of this
+    // exact name (GPU zones only; CPU rows and frames leave it empty).
+    std::string parentName;
     RowOrder order = RowOrder::Sequential;
     std::vector<FilterTerm> terms;
 };

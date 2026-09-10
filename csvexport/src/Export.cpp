@@ -99,7 +99,10 @@ struct Row
     const char* value;      // nullptr = no zone text
     int64_t frame;          // frame number for RowKind::Frame, -1 otherwise
     RowKind kind;
+    int64_t parentStart;    // start of the enclosing -P zone, kNoParent if none
 };
+
+constexpr int64_t kNoParent = INT64_MIN;
 
 // Threads and GPU contexts referenced by the exported rows, written as the .threads file.
 // CPU threads and GPU contexts have separate id spaces, so the key includes the gpu flag.
@@ -342,7 +345,7 @@ private:
                 }
 
                 const auto tid = m_worker.DecompressThread( ztd.Thread() );
-                Push( slz.first, zone.Start(), duration, int64_t( tid ), m_worker.GetThreadName( tid ), RowKind::Cpu, text );
+                Push( slz.first, zone.Start(), duration, int64_t( tid ), m_worker.GetThreadName( tid ), RowKind::Cpu, text, kNoParent );
             }
         }
     }
@@ -368,26 +371,35 @@ private:
             }
             for( const auto& td : ctx->threadData )
             {
-                CollectGpuTimeline( ctxIdx, ctxName, td.second.timeline );
+                CollectGpuTimeline( ctxIdx, ctxName, td.second.timeline, kNoParent );
             }
             ++ctxIdx;
         }
     }
 
-    void CollectGpuTimeline( int ctxIdx, const char* ctxName, const tracy::Vector<tracy::short_ptr<tracy::GpuEvent>>& timeline )
+    // parentStart is the start of the nearest enclosing zone named by -P above this timeline.
+    void CollectGpuTimeline( int ctxIdx, const char* ctxName, const tracy::Vector<tracy::short_ptr<tracy::GpuEvent>>& timeline, int64_t parentStart )
     {
         auto visit = [&]( const tracy::GpuEvent& ev )
         {
+            const char* name = GetZoneName( m_worker, ev.SrcLoc() );
+            // Children of a -P parent follow the parent's window membership so a parent is
+            // exported either with all of its children or not at all.
+            const auto windowTime = parentStart != kNoParent ? parentStart : ev.GpuStart();
             // Negative timestamps mean the GPU never reported this zone; the worker skips those too.
-            if( ev.GpuStart() >= 0 && ev.GpuEnd() >= 0 && InWindow( ev.GpuStart() ) )
+            if( ev.GpuStart() >= 0 && ev.GpuEnd() >= 0 && InWindow( windowTime ) )
             {
-                const auto terms = TermsForName( m_opts, GetZoneName( m_worker, ev.SrcLoc() ) );
+                const auto terms = TermsForName( m_opts, name );
                 if( !terms.empty() && AnyGpuScope( terms ) )
                 {
-                    Push( ev.SrcLoc(), ev.GpuStart(), ev.GpuEnd() - ev.GpuStart(), ctxIdx, ctxName, RowKind::Gpu, nullptr );
+                    Push( ev.SrcLoc(), ev.GpuStart(), ev.GpuEnd() - ev.GpuStart(), ctxIdx, ctxName, RowKind::Gpu, nullptr, parentStart );
                 }
             }
-            if( ev.Child() >= 0 ) CollectGpuTimeline( ctxIdx, ctxName, m_worker.GetGpuChildren( ev.Child() ) );
+            if( ev.Child() >= 0 )
+            {
+                const auto childParent = IsParent( name ) && ev.GpuStart() >= 0 ? ev.GpuStart() : parentStart;
+                CollectGpuTimeline( ctxIdx, ctxName, m_worker.GetGpuChildren( ev.Child() ), childParent );
+            }
         };
 
         if( timeline.is_magic() )
@@ -423,15 +435,21 @@ private:
             {
                 const auto begin = m_worker.GetFrameBegin( *fd, i );
                 if( begin < firstTime || !InWindow( begin ) ) continue;
-                m_rows.push_back( Row { name, nullptr, 0, begin, m_worker.GetFrameTime( *fd, i ), -1, nullptr, nullptr, int64_t( numberBase + i ), RowKind::Frame } );
+                m_rows.push_back( Row { name, nullptr, 0, begin, m_worker.GetFrameTime( *fd, i ), -1, nullptr, nullptr, int64_t( numberBase + i ), RowKind::Frame, kNoParent } );
             }
         }
     }
 
-    void Push( int16_t srcloc, int64_t start, int64_t duration, int64_t threadId, const char* threadName, RowKind kind, const char* value )
+    void Push( int16_t srcloc, int64_t start, int64_t duration, int64_t threadId, const char* threadName, RowKind kind, const char* value, int64_t parentStart )
     {
         const auto& sl = m_worker.GetSourceLocation( srcloc );
-        m_rows.push_back( Row { GetZoneName( m_worker, srcloc ), m_worker.GetString( sl.file ), sl.line, start, duration, threadId, threadName, value, -1, kind } );
+        m_rows.push_back( Row { GetZoneName( m_worker, srcloc ), m_worker.GetString( sl.file ), sl.line, start, duration, threadId, threadName, value, -1, kind, parentStart } );
+    }
+
+    bool IsParent( const char* name ) const
+    {
+        if( m_opts.parentName.empty() ) return false;
+        return m_opts.caseSensitive ? m_opts.parentName == name : EqualsIgnoreCase( m_opts.parentName.c_str(), name );
     }
 
     // Strings not owned by the worker live here so Row pointers stay valid until the export ends.
@@ -470,6 +488,7 @@ public:
         : m_f( f ), m_opts( opts ), m_dict( dict ), m_threads( threads ), m_sep( opts.separator )
     {
         for( const auto& term : opts.terms ) m_hasFrames |= term.scope.kind == Scope::Kind::Frames;
+        m_hasParent = !opts.parentName.empty();
     }
 
     // The frame column exists only when frame sets were requested, so zone-only exports keep
@@ -480,6 +499,7 @@ public:
         if( !m_opts.noLocation ) fprintf( m_f, "src_file%ssrc_line%s", m_sep, m_sep );
         fprintf( m_f, "%s%s%s%sthread%sgpu%svalue", StartHeader(), m_sep, DurationHeader(), m_sep, m_sep, m_sep );
         if( m_hasFrames ) fprintf( m_f, "%sframe", m_sep );
+        if( m_hasParent ) fprintf( m_f, "%sparent_%s", m_sep, StartHeader() );
         fputc( '\n', m_f );
 
         for( const auto& row : rows )
@@ -497,6 +517,11 @@ public:
             {
                 fputs( m_sep, m_f );
                 WriteFrame( row );
+            }
+            if( m_hasParent )
+            {
+                fputs( m_sep, m_f );
+                WriteParent( row );
             }
             fputc( '\n', m_f );
         }
@@ -526,8 +551,9 @@ public:
         {
             // Frame groups carry the frame number where zone groups carry the zone text.
             const bool frames = rows[g.begin].kind == RowKind::Frame;
-            const char* cols[] = { "src_file", "src_line", StartHeader(), DurationHeader(), "thread", frames ? "frame" : "value" };
-            for( size_t c = m_opts.noLocation ? 2 : 0; c < 6; ++c )
+            const std::string parentCol = std::string( "parent_" ) + StartHeader();
+            const char* cols[] = { "src_file", "src_line", StartHeader(), DurationHeader(), "thread", frames ? "frame" : "value", parentCol.c_str() };
+            for( size_t c = m_opts.noLocation ? 2 : 0; c < ( m_hasParent ? 7 : 6 ); ++c )
             {
                 if( !first ) fputs( m_sep, m_f );
                 first = false;
@@ -544,7 +570,7 @@ public:
             first = true;
             for( const auto& g : groups )
             {
-                const size_t cells = m_opts.noLocation ? 4 : 6;
+                const size_t cells = ( m_opts.noLocation ? 4 : 6 ) + ( m_hasParent ? 1 : 0 );
                 if( !first ) fputs( m_sep, m_f );
                 first = false;
                 if( g.begin + k >= g.end )
@@ -568,6 +594,11 @@ public:
                 {
                     WriteIndex( row.value );
                 }
+                if( m_hasParent )
+                {
+                    fputs( m_sep, m_f );
+                    WriteParent( row );
+                }
             }
             fputc( '\n', m_f );
         }
@@ -581,6 +612,12 @@ private:
         if( row.threadId < 0 ) return;
         fprintf( m_f, "%lld", (long long)row.threadId );
         m_threads.Add( row );
+    }
+
+    // Start of the enclosing -P zone in the time units of the start column; empty when none.
+    void WriteParent( const Row& row )
+    {
+        if( row.parentStart != kNoParent ) WriteTime( row.parentStart );
     }
 
     // Frame number as a plain number, or an empty cell for zone rows.
@@ -629,6 +666,7 @@ private:
     ThreadTable& m_threads;
     const char* m_sep;
     bool m_hasFrames = false;
+    bool m_hasParent = false;
 };
 
 }
@@ -717,7 +755,11 @@ int RunExport( const tracy::Worker& worker, const ExportOptions& opts )
     {
         int64_t minStart = INT64_MAX;
         for( const auto& row : rows ) minStart = std::min( minStart, row.start );
-        for( auto& row : rows ) row.start -= minStart;
+        for( auto& row : rows )
+        {
+            row.start -= minStart;
+            if( row.parentStart != kNoParent ) row.parentStart -= minStart;
+        }
     }
 
     std::stable_sort( rows.begin(), rows.end(), opts.order == RowOrder::Interleaved ? ByStart : ByNameThenStart );
