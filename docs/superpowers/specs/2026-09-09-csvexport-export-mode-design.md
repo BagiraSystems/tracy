@@ -32,11 +32,13 @@ Outside `-x`, behaviour is unchanged. Using `-L`, `-T`, more than one `-f`, or a
 Columns: `name, src_file, src_line, ns_since_start, exec_time_ns, thread, gpu, value`.
 With `-L`: `name, ns_since_start, exec_time_ns, thread, gpu, value`.
 
-- `name`, `src_file`, `thread`, `value` are dictionary indices.
-- `src_line`, `ns_since_start`, `exec_time_ns`, `gpu` (0/1) are plain numbers.
+- `name`, `src_file`, `value` are dictionary indices.
+- `src_line`, `ns_since_start`, `exec_time_ns`, `thread`, `gpu` (0/1) are plain numbers.
 - Absent zone text -> empty `value` cell (not an index), so the column loads as nullable int.
 - CPU rows first, grouped by source location in worker iteration order (as `-u`), then GPU rows.
-- `thread` = thread name for CPU rows, GPU context name for GPU rows.
+- `thread` = OS thread id for CPU rows, GPU context index for GPU rows (separate id spaces; the
+  `gpu` column tells which). Names are not unique (worker pools), hence ids. Referenced threads and
+  contexts are listed in `<file>.threads` as `id<sep>gpu<sep>name` (name CSV-quoted), sorted by id.
 - GPU rows: `ns_since_start = GpuStart`, `exec_time_ns = GpuEnd - GpuStart` (as `-g`).
 - GPU zones whose timestamps were never reported by the GPU (`GpuStart`/`GpuEnd` negative) are
   skipped, as the worker's own statistics do.

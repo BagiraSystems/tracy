@@ -94,10 +94,41 @@ struct Row
     uint32_t line;
     int64_t start;
     int64_t duration;
-    const char* thread;     // nullptr = no thread (frames)
+    int64_t threadId;       // OS thread id (CPU) or GPU context index (GPU); -1 = none (frames)
+    const char* threadName; // nullptr when threadId is -1
     const char* value;      // nullptr = no zone text
     int64_t frame;          // frame number for RowKind::Frame, -1 otherwise
     RowKind kind;
+};
+
+// Threads and GPU contexts referenced by the exported rows, written as the .threads file.
+// CPU threads and GPU contexts have separate id spaces, so the key includes the gpu flag.
+class ThreadTable
+{
+public:
+    void Add( const Row& row )
+    {
+        if( row.threadId < 0 ) return;
+        m_names.emplace( std::make_pair( row.kind == RowKind::Gpu, row.threadId ), row.threadName );
+    }
+
+    bool Write( const char* path, const char* sep ) const
+    {
+        FILE* f = fopen( path, "wb" );
+        if( !f ) return false;
+        fprintf( f, "id%sgpu%sname\n", sep, sep );
+        for( const auto& t : m_names )
+        {
+            fprintf( f, "%lld%s%d%s", (long long)t.first.second, sep, t.first.first ? 1 : 0, sep );
+            WriteQuoted( f, t.second );
+            fputc( '\n', f );
+        }
+        fclose( f );
+        return true;
+    }
+
+private:
+    std::map<std::pair<bool, int64_t>, const char*> m_names;
 };
 
 const char* GetZoneName( const tracy::Worker& worker, int16_t srcloc )
@@ -310,8 +341,8 @@ private:
                     if( ref.Active() ) text = m_worker.GetString( ref );
                 }
 
-                const auto threadName = m_worker.GetThreadName( m_worker.DecompressThread( ztd.Thread() ) );
-                Push( slz.first, zone.Start(), duration, threadName, RowKind::Cpu, text );
+                const auto tid = m_worker.DecompressThread( ztd.Thread() );
+                Push( slz.first, zone.Start(), duration, int64_t( tid ), m_worker.GetThreadName( tid ), RowKind::Cpu, text );
             }
         }
     }
@@ -325,7 +356,7 @@ private:
         int ctxIdx = 0;
         for( const auto ctx : m_worker.GetGpuData() )
         {
-            // Pooled so Row::thread can point at it; the worker owns named contexts, we own the fallbacks.
+            // Pooled so Row::threadName can point at it; the worker owns named contexts, we own the fallbacks.
             const char* ctxName;
             if( ctx->name.Active() )
             {
@@ -335,15 +366,15 @@ private:
             {
                 ctxName = Pool( "GPU context " + std::to_string( ctxIdx ) );
             }
-            ++ctxIdx;
             for( const auto& td : ctx->threadData )
             {
-                CollectGpuTimeline( ctxName, td.second.timeline );
+                CollectGpuTimeline( ctxIdx, ctxName, td.second.timeline );
             }
+            ++ctxIdx;
         }
     }
 
-    void CollectGpuTimeline( const char* ctxName, const tracy::Vector<tracy::short_ptr<tracy::GpuEvent>>& timeline )
+    void CollectGpuTimeline( int ctxIdx, const char* ctxName, const tracy::Vector<tracy::short_ptr<tracy::GpuEvent>>& timeline )
     {
         auto visit = [&]( const tracy::GpuEvent& ev )
         {
@@ -353,10 +384,10 @@ private:
                 const auto terms = TermsForName( m_opts, GetZoneName( m_worker, ev.SrcLoc() ) );
                 if( !terms.empty() && AnyGpuScope( terms ) )
                 {
-                    Push( ev.SrcLoc(), ev.GpuStart(), ev.GpuEnd() - ev.GpuStart(), ctxName, RowKind::Gpu, nullptr );
+                    Push( ev.SrcLoc(), ev.GpuStart(), ev.GpuEnd() - ev.GpuStart(), ctxIdx, ctxName, RowKind::Gpu, nullptr );
                 }
             }
-            if( ev.Child() >= 0 ) CollectGpuTimeline( ctxName, m_worker.GetGpuChildren( ev.Child() ) );
+            if( ev.Child() >= 0 ) CollectGpuTimeline( ctxIdx, ctxName, m_worker.GetGpuChildren( ev.Child() ) );
         };
 
         if( timeline.is_magic() )
@@ -392,15 +423,15 @@ private:
             {
                 const auto begin = m_worker.GetFrameBegin( *fd, i );
                 if( begin < firstTime || !InWindow( begin ) ) continue;
-                m_rows.push_back( Row { name, nullptr, 0, begin, m_worker.GetFrameTime( *fd, i ), nullptr, nullptr, int64_t( numberBase + i ), RowKind::Frame } );
+                m_rows.push_back( Row { name, nullptr, 0, begin, m_worker.GetFrameTime( *fd, i ), -1, nullptr, nullptr, int64_t( numberBase + i ), RowKind::Frame } );
             }
         }
     }
 
-    void Push( int16_t srcloc, int64_t start, int64_t duration, const char* thread, RowKind kind, const char* value )
+    void Push( int16_t srcloc, int64_t start, int64_t duration, int64_t threadId, const char* threadName, RowKind kind, const char* value )
     {
         const auto& sl = m_worker.GetSourceLocation( srcloc );
-        m_rows.push_back( Row { GetZoneName( m_worker, srcloc ), m_worker.GetString( sl.file ), sl.line, start, duration, thread, value, -1, kind } );
+        m_rows.push_back( Row { GetZoneName( m_worker, srcloc ), m_worker.GetString( sl.file ), sl.line, start, duration, threadId, threadName, value, -1, kind } );
     }
 
     // Strings not owned by the worker live here so Row pointers stay valid until the export ends.
@@ -435,8 +466,8 @@ bool ByStart( const Row& a, const Row& b )
 class Writer
 {
 public:
-    Writer( FILE* f, const ExportOptions& opts, Dictionary& dict )
-        : m_f( f ), m_opts( opts ), m_dict( dict ), m_sep( opts.separator )
+    Writer( FILE* f, const ExportOptions& opts, Dictionary& dict, ThreadTable& threads )
+        : m_f( f ), m_opts( opts ), m_dict( dict ), m_threads( threads ), m_sep( opts.separator )
     {
         for( const auto& term : opts.terms ) m_hasFrames |= term.scope.kind == Scope::Kind::Frames;
     }
@@ -459,7 +490,7 @@ public:
             fputs( m_sep, m_f );
             WriteTime( row.duration );
             fputs( m_sep, m_f );
-            WriteIndex( row.thread );
+            WriteThread( row );
             fprintf( m_f, "%s%d%s", m_sep, row.kind == RowKind::Gpu ? 1 : 0, m_sep );
             WriteIndex( row.value );
             if( m_hasFrames )
@@ -527,7 +558,7 @@ public:
                 fputs( m_sep, m_f );
                 WriteTime( row.duration );
                 fputs( m_sep, m_f );
-                WriteIndex( row.thread );
+                WriteThread( row );
                 fputs( m_sep, m_f );
                 if( row.kind == RowKind::Frame )
                 {
@@ -543,6 +574,15 @@ public:
     }
 
 private:
+    // Thread id (or GPU context index) as a plain number, registered for the .threads file;
+    // empty cell for rows without a thread.
+    void WriteThread( const Row& row )
+    {
+        if( row.threadId < 0 ) return;
+        fprintf( m_f, "%lld", (long long)row.threadId );
+        m_threads.Add( row );
+    }
+
     // Frame number as a plain number, or an empty cell for zone rows.
     void WriteFrame( const Row& row )
     {
@@ -586,6 +626,7 @@ private:
     FILE* m_f;
     const ExportOptions& m_opts;
     Dictionary& m_dict;
+    ThreadTable& m_threads;
     const char* m_sep;
     bool m_hasFrames = false;
 };
@@ -689,7 +730,8 @@ int RunExport( const tracy::Worker& worker, const ExportOptions& opts )
     }
 
     Dictionary dict;
-    Writer writer( f, opts, dict );
+    ThreadTable threads;
+    Writer writer( f, opts, dict, threads );
     if( opts.order == RowOrder::Columns )
     {
         writer.WriteColumns( rows );
@@ -704,6 +746,12 @@ int RunExport( const tracy::Worker& worker, const ExportOptions& opts )
     if( !dict.Write( dictPath.c_str(), opts.separator ) )
     {
         fprintf( stderr, "Could not open dictionary file %s\n", dictPath.c_str() );
+        return 1;
+    }
+    const std::string threadsPath = std::string( opts.outputPath ) + ".threads";
+    if( !threads.Write( threadsPath.c_str(), opts.separator ) )
+    {
+        fprintf( stderr, "Could not open threads file %s\n", threadsPath.c_str() );
         return 1;
     }
     return 0;

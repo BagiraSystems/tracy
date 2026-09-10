@@ -5533,12 +5533,12 @@ You can customize the output with the following command line options:
 \subsection{Per-event export with a string dictionary}
 \label{csvexportdict}
 
-The \texttt{-x, -\hspace{-1.25ex} -export <file>} option switches to a separate mode intended for large traces. Instead of printing to stdout, it writes one row per zone occurrence to \texttt{<file>}, and every string (zone name, source file, thread or GPU context name, zone text) is replaced by an index into a dictionary written to \texttt{<file>.dict}. The dictionary is a two-column CSV (\texttt{index}, \texttt{string}) using the same separator; its strings are quoted so paths or texts containing the separator survive. The row columns are:
+The \texttt{-x, -\hspace{-1.25ex} -export <file>} option switches to a separate mode intended for large traces. Instead of printing to stdout, it writes one row per zone occurrence to \texttt{<file>}, and every string (zone name, source file, zone text) is replaced by an index into a dictionary written to \texttt{<file>.dict}. The dictionary is a two-column CSV (\texttt{index}, \texttt{string}) using the same separator; its strings are quoted so paths or texts containing the separator survive. Threads are referenced by id instead: the \texttt{thread} column holds the OS thread id of a CPU zone, or the GPU context index of a GPU zone, and \texttt{<file>.threads} lists the referenced ones as \texttt{id}, \texttt{gpu}, \texttt{name} (CPU threads and GPU contexts have separate id spaces, so the \texttt{gpu} flag is part of the key). Thread names are not unique -- a worker pool shares one name -- which is why the id is the key. The row columns are:
 
 \begin{itemize}
-  \item \texttt{name}, \texttt{src\_file}, \texttt{thread}, \texttt{value} -- Dictionary indices (\texttt{value} is empty when the zone has no text)
-  \item \texttt{src\_line}, \texttt{ns\_since\_start}, \texttt{exec\_time\_ns} -- Plain numbers
-  \item \texttt{gpu} -- 1 for GPU zones, 0 for CPU zones; the \texttt{thread} of a GPU zone is its GPU context name
+  \item \texttt{name}, \texttt{src\_file}, \texttt{value} -- Dictionary indices (\texttt{value} is empty when the zone has no text)
+  \item \texttt{src\_line}, \texttt{ns\_since\_start}, \texttt{exec\_time\_ns}, \texttt{thread} -- Plain numbers
+  \item \texttt{gpu} -- 1 for GPU zones, 0 for CPU zones
 \end{itemize}
 
 CPU rows are listed first, then GPU rows. Unlike \texttt{-g}, GPU zones with a zero time span are included; GPU zones whose timestamps were never reported are skipped. Options specific to this mode:
