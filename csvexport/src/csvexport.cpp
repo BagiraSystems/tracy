@@ -51,6 +51,9 @@ void print_usage_exit(int e)
     fprintf(stderr, "  -z, --zero                 Shift times so the earliest exported event starts at 0\n");
     fprintf(stderr, "  -b, --begin arg            Export only events starting arg seconds after the trace start\n");
     fprintf(stderr, "  -l, --length arg           Length of the exported window in seconds (default: unbounded)\n");
+    fprintf(stderr, "  -B, --begin-frame arg      Window starts at frame arg of the main frame set (profiler numbering)\n");
+    fprintf(stderr, "  -n, --frames arg           Window length in frames\n");
+    fprintf(stderr, "  -E, --end-frame arg        Last frame included in the window (alternative to -n)\n");
     fprintf(stderr, "  -S, --seconds              Emit times as floating-point seconds instead of integer ns\n");
     fprintf(stderr, "  -o, --order arg            Row order: sequential (default) | interleaved | columns\n");
 
@@ -76,6 +79,9 @@ struct Args {
     bool seconds = false;
     double begin_sec = 0;
     double length_sec = -1;
+    int64_t begin_frame = -1;
+    int64_t frame_count = -1;
+    int64_t end_frame = -1;
     RowOrder order = RowOrder::Sequential;
     bool export_only_flag_used = false;
     std::vector<const char*> filters;
@@ -89,6 +95,18 @@ double parse_seconds(const char* arg, const char* opt)
     if (end == arg || *end != '\0' || v < 0)
     {
         fprintf(stderr, "%s expects a non-negative number of seconds, got '%s'\n", opt, arg);
+        print_usage_exit(1);
+    }
+    return v;
+}
+
+int64_t parse_frame(const char* arg, const char* opt)
+{
+    char* end = nullptr;
+    const long long v = strtoll(arg, &end, 10);
+    if (end == arg || *end != '\0' || v < 0)
+    {
+        fprintf(stderr, "%s expects a non-negative frame number, got '%s'\n", opt, arg);
         print_usage_exit(1);
     }
     return v;
@@ -122,13 +140,16 @@ Args parse_args(int argc, char** argv)
         { "zero", no_argument, NULL, 'z' },
         { "begin", required_argument, NULL, 'b' },
         { "length", required_argument, NULL, 'l' },
+        { "begin-frame", required_argument, NULL, 'B' },
+        { "frames", required_argument, NULL, 'n' },
+        { "end-frame", required_argument, NULL, 'E' },
         { "seconds", no_argument, NULL, 'S' },
         { "order", required_argument, NULL, 'o' },
         { NULL, 0, NULL, 0 }
     };
 
     int c;
-    while ((c = getopt_long(argc, argv, "hf:s:t:ceugmpVx:F:T:Lzb:l:So:", long_opts, NULL)) != -1)
+    while ((c = getopt_long(argc, argv, "hf:s:t:ceugmpVx:F:T:Lzb:l:B:n:E:So:", long_opts, NULL)) != -1)
     {
         switch (c)
         {
@@ -165,6 +186,18 @@ Args parse_args(int argc, char** argv)
             break;
         case 'l':
             args.length_sec = parse_seconds(optarg, "-l");
+            args.export_only_flag_used = true;
+            break;
+        case 'B':
+            args.begin_frame = parse_frame(optarg, "-B");
+            args.export_only_flag_used = true;
+            break;
+        case 'n':
+            args.frame_count = parse_frame(optarg, "-n");
+            args.export_only_flag_used = true;
+            break;
+        case 'E':
+            args.end_frame = parse_frame(optarg, "-E");
             args.export_only_flag_used = true;
             break;
         case 'S':
@@ -223,6 +256,17 @@ Args parse_args(int argc, char** argv)
             fprintf(stderr, "-x cannot be combined with -u, -g, -m, -p or -t\n");
             print_usage_exit(1);
         }
+        const bool frame_window = args.begin_frame >= 0 || args.frame_count >= 0 || args.end_frame >= 0;
+        if (frame_window && (args.begin_sec > 0 || args.length_sec >= 0))
+        {
+            fprintf(stderr, "-B, -n, -E (frame window) cannot be combined with -b, -l (time window)\n");
+            print_usage_exit(1);
+        }
+        if (args.frame_count >= 0 && args.end_frame >= 0)
+        {
+            fprintf(stderr, "-n and -E are alternatives; give only one\n");
+            print_usage_exit(1);
+        }
     }
     else
     {
@@ -231,7 +275,7 @@ Args parse_args(int argc, char** argv)
         for (auto f : args.filters) scoped_filter |= strchr(f, '@') != nullptr;
         if (args.no_location || args.export_only_flag_used || strcmp(args.default_scope, "all") != 0 || args.filters.size() > 1 || scoped_filter)
         {
-            fprintf(stderr, "-F, -L, -T, -z, -b, -l, -S, -o, repeated -f and NAME@SCOPE filters require -x\n");
+            fprintf(stderr, "-F, -L, -T, -z, -b, -l, -B, -n, -E, -S, -o, repeated -f and NAME@SCOPE filters require -x\n");
             print_usage_exit(1);
         }
     }
@@ -433,6 +477,9 @@ int main(int argc, char** argv)
         opts.seconds = args.seconds;
         opts.beginSec = args.begin_sec;
         opts.lengthSec = args.length_sec;
+        opts.beginFrame = args.begin_frame;
+        opts.frameCount = args.frame_count;
+        opts.endFrame = args.end_frame;
         opts.order = args.order;
 
         const Scope defaultScope = ParseScope(args.default_scope);

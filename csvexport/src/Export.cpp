@@ -189,17 +189,86 @@ int64_t GetZoneChildTimeFast( const tracy::Worker& worker, const tracy::ZoneEven
     return time;
 }
 
+// Frame number of frame index i in the main frame set, as the profiler's View::GetFrameNumber.
+uint64_t FrameNumberBase( const tracy::Worker& worker, const tracy::FrameData& fd )
+{
+    if( &fd != worker.GetFramesBase() ) return 1;
+    const auto offset = worker.GetFrameOffset();
+    return offset == 0 ? 0 : offset - 1;
+}
+
+// Half-open [begin, end) time range selected by the -b/-l or -B/-n/-E options.
+struct Window
+{
+    int64_t begin = INT64_MIN;
+    int64_t end = INT64_MAX;
+};
+
+// Returns false with a message in err when a frame number is outside the trace.
+bool ResolveWindow( const tracy::Worker& worker, const ExportOptions& opts, Window& out, std::string& err )
+{
+    const auto first = worker.GetFirstTime();
+    if( opts.beginFrame < 0 && opts.frameCount < 0 && opts.endFrame < 0 )
+    {
+        // GPU timestamps may precede the first CPU event, so only an explicit -b bounds the start.
+        if( opts.beginSec > 0 ) out.begin = first + int64_t( opts.beginSec * 1e9 );
+        if( opts.lengthSec >= 0 ) out.end = first + int64_t( ( opts.beginSec + opts.lengthSec ) * 1e9 );
+        return true;
+    }
+
+    const auto& fd = *worker.GetFramesBase();
+    const auto count = int64_t( worker.GetFrameCount( fd ) );
+    const auto base = int64_t( FrameNumberBase( worker, fd ) );
+    // Placeholder frames before the trace start are not addressable, as in the profiler.
+    int64_t firstIdx = 0;
+    while( firstIdx < count && worker.GetFrameBegin( fd, firstIdx ) < first ) ++firstIdx;
+    if( firstIdx >= count )
+    {
+        err = "the trace has no frames";
+        return false;
+    }
+
+    auto checkFrame = [&]( int64_t number, const char* what ) -> bool
+    {
+        const auto idx = number - base;
+        if( idx < firstIdx || idx >= count )
+        {
+            err = std::string( what ) + " " + std::to_string( number ) + " is outside the trace (frames " + std::to_string( firstIdx + base ) + " to " + std::to_string( count - 1 + base ) + ")";
+            return false;
+        }
+        return true;
+    };
+
+    const auto beginIdx = opts.beginFrame >= 0 ? opts.beginFrame - base : firstIdx;
+    if( opts.beginFrame >= 0 && !checkFrame( opts.beginFrame, "begin frame" ) ) return false;
+    out.begin = worker.GetFrameBegin( fd, beginIdx );
+
+    if( opts.endFrame >= 0 )
+    {
+        if( !checkFrame( opts.endFrame, "end frame" ) ) return false;
+        if( opts.endFrame - base < beginIdx )
+        {
+            err = "end frame precedes begin frame";
+            return false;
+        }
+        out.end = worker.GetFrameEnd( fd, opts.endFrame - base );
+    }
+    else if( opts.frameCount >= 0 )
+    {
+        // A window past the last frame simply ends where the trace ends.
+        const auto lastIdx = std::min( beginIdx + opts.frameCount - 1, count - 1 );
+        out.end = opts.frameCount == 0 ? out.begin : worker.GetFrameEnd( fd, lastIdx );
+    }
+    return true;
+}
+
 // Gathers the matching zone occurrences from the worker into Row records.
 class Collector
 {
 public:
-    Collector( const tracy::Worker& worker, const ExportOptions& opts )
-        : m_worker( worker ), m_opts( opts )
+    Collector( const tracy::Worker& worker, const ExportOptions& opts, const Window& window )
+        : m_worker( worker ), m_opts( opts ), m_windowBegin( window.begin ), m_windowEnd( window.end )
     {
-        // GPU timestamps may precede the first CPU event, so only an explicit -b bounds the start.
-        const auto first = worker.GetFirstTime();
-        m_windowBegin = opts.beginSec > 0 ? first + int64_t( opts.beginSec * 1e9 ) : INT64_MIN;
-        m_windowEnd = opts.lengthSec < 0 ? INT64_MAX : first + int64_t( ( opts.beginSec + opts.lengthSec ) * 1e9 );
     }
 
     // The rows point into this collector's string pool, so it must outlive their use.
@@ -314,9 +383,7 @@ private:
             const auto terms = TermsForName( m_opts, name );
             if( terms.empty() || !AnyFramesScope( terms ) ) continue;
 
-            // Same numbering as the profiler's View::GetFrameNumber.
-            const auto offset = m_worker.GetFrameOffset();
-            const uint64_t numberBase = fd != m_worker.GetFramesBase() ? 1 : offset == 0 ? 0 : offset - 1;
+            const uint64_t numberBase = FrameNumberBase( m_worker, *fd );
             // On-demand traces start with placeholder frames from before the connection; the
             // profiler's timeline (GetFirstTime) begins after them, so they are skipped here too.
             const auto firstTime = m_worker.GetFirstTime();
@@ -594,7 +661,15 @@ bool ParseRowOrder( const char* spec, RowOrder& out )
 
 int RunExport( const tracy::Worker& worker, const ExportOptions& opts )
 {
-    Collector collector( worker, opts );
+    Window window;
+    std::string err;
+    if( !ResolveWindow( worker, opts, window, err ) )
+    {
+        fprintf( stderr, "%s\n", err.c_str() );
+        return 1;
+    }
+
+    Collector collector( worker, opts, window );
     auto& rows = collector.Run();
 
     if( opts.zeroShift && !rows.empty() )

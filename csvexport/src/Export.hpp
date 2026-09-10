@@ -46,6 +46,11 @@ struct ExportOptions
     bool seconds = false;
     double beginSec = 0;
     double lengthSec = -1;      // < 0 = unbounded
+    // Frame window on the main frame set, profiler numbering; -1 = not set. Exclusive with the
+    // time window above; endFrame is inclusive and an alternative to frameCount.
+    int64_t beginFrame = -1;
+    int64_t frameCount = -1;
+    int64_t endFrame = -1;
     RowOrder order = RowOrder::Sequential;
     std::vector<FilterTerm> terms;
 };

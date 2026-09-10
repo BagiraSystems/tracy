@@ -5550,6 +5550,9 @@ CPU rows are listed first, then GPU rows. Unlike \texttt{-g}, GPU zones with a z
   \item \texttt{-T, -\hspace{-1.25ex} -scope <scope>} -- Default scope for \texttt{-f} terms without an explicit \texttt{@}, and for the export of all zones when no \texttt{-f} is given
   \item \texttt{-b, -\hspace{-1.25ex} -begin <seconds>} -- Export only events that start at or after the given time, measured from the start of the trace (the profiler's zero)
   \item \texttt{-l, -\hspace{-1.25ex} -length <seconds>} -- Length of the exported window, counted from \texttt{-b}; an event starting inside the window is kept even if it ends outside it
+  \item \texttt{-B, -\hspace{-1.25ex} -begin-frame <frame>} -- Start the window at the begin of the given frame of the main frame set, using the profiler's frame numbering (the same numbers the \texttt{frame} column prints); defaults to the first frame of the trace when only \texttt{-n} or \texttt{-E} is given
+  \item \texttt{-n, -\hspace{-1.25ex} -frames <count>} -- Length of the window in frames
+  \item \texttt{-E, -\hspace{-1.25ex} -end-frame <frame>} -- Last frame included in the window; an alternative to \texttt{-n}. The frame window cannot be combined with the \texttt{-b}/\texttt{-l} time window
   \item \texttt{-z, -\hspace{-1.25ex} -zero} -- Shift start times so that the earliest exported event starts at zero
   \item \texttt{-S, -\hspace{-1.25ex} -seconds} -- Emit times as floating-point seconds with nanosecond precision instead of integer nanoseconds; the columns are then named \texttt{s\_since\_start} and \texttt{exec\_time\_s}
   \item \texttt{-o, -\hspace{-1.25ex} -order <mode>} -- Row order: \texttt{sequential} (by name, then start; the default), \texttt{interleaved} (by start), or \texttt{columns}
