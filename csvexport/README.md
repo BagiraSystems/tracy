@@ -57,6 +57,7 @@ SCOPE says where the name is looked for:
 | `cpu` | CPU zones on every thread |
 | `gpu` | GPU zones only |
 | `frames` | FrameMark frame sets (see *Frames*) |
+| `messages` | TracyMessage texts (see *Messages*); NAME matches the text |
 | anything else | CPU zones on threads whose **name contains** the text, or whose **id equals** it when it is all digits (ids are listed in `.threads`) |
 
 Zone names are often C++ function names containing `::`, which is why `@` is the separator.
@@ -128,6 +129,13 @@ id. Thread names are not unique (a worker pool shares one name), which is why th
 name (`Frame` for the main set), one row per frame with begin time and length (to the next
 frame's begin), empty location and thread cells, and the `frame` column. Placeholder frames from
 before the trace start (present in on-demand captures) are skipped, as the profiler does.
+
+### Messages
+
+`-f @messages` / `-f "campos@messages"` export TracyMessage texts as rows: `name` is the constant
+`Message`, `value` is the text (dictionary index), `thread` the emitting thread, `exec_time` 0,
+`gpu` 0. The text is what NAME is matched against, so `-f "sensor@messages"` selects the sensor
+messages only. Combine with `-F Frame@frames` (or `-b/-l`, `-B/-n`) to place messages in frames.
 
 ### `columns` order
 

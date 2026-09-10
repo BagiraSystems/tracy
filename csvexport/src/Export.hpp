@@ -7,10 +7,11 @@
 
 namespace tracy { class Worker; }
 
-// Where a filter term looks for zones. Frames are the FrameMark frame sets, not zones.
+// Where a filter term looks. Frames are the FrameMark frame sets and Messages the TracyMessage
+// texts, neither of which are zones.
 struct Scope
 {
-    enum class Kind { All, Cpu, Gpu, Thread, Frames };
+    enum class Kind { All, Cpu, Gpu, Thread, Frames, Messages };
 
     Kind kind = Kind::All;
     // Kind::Thread only: either an exact OS thread id, or a substring of the thread name.
@@ -61,7 +62,7 @@ struct ExportOptions
 // Case-insensitive unless caseSensitive; matches when term is a substring of s.
 bool IsSubstring( const char* term, const char* s, bool caseSensitive );
 
-// Keywords "all", "cpu", "gpu", "frames" (case-insensitive); anything else is a thread spec.
+// Keywords "all", "cpu", "gpu", "frames", "messages" (case-insensitive); anything else is a thread spec.
 Scope ParseScope( const char* spec );
 
 // Splits at the first '@'; a missing scope falls back to defaultScope.

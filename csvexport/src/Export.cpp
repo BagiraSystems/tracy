@@ -85,7 +85,7 @@ private:
 
 // One exported zone occurrence. String pointers refer to worker-owned storage (or the
 // context-name pool in Collector), so they stay valid until the export finishes.
-enum class RowKind { Cpu, Gpu, Frame };
+enum class RowKind { Cpu, Gpu, Frame, Message };
 
 struct Row
 {
@@ -179,8 +179,18 @@ bool AnyCpuScope( const std::vector<const FilterTerm*>& terms, const tracy::Work
             break;
         case Scope::Kind::Gpu:
         case Scope::Kind::Frames:
+        case Scope::Kind::Messages:
             break;
         }
+    }
+    return false;
+}
+
+bool AnyScopeOf( const std::vector<const FilterTerm*>& terms, Scope::Kind kind )
+{
+    for( auto term : terms )
+    {
+        if( term->scope.kind == kind ) return true;
     }
     return false;
 }
@@ -311,6 +321,7 @@ public:
         CollectCpu();
         CollectGpu();
         CollectFrames();
+        CollectMessages();
         return m_rows;
     }
 
@@ -443,6 +454,25 @@ private:
         }
     }
 
+    // One row per TracyMessage whose text matches a term with the messages scope. The text is the
+    // row value; the name is the constant "Message" so all messages form one group.
+    void CollectMessages()
+    {
+        bool any = false;
+        for( const auto& term : m_opts.terms ) any |= term.scope.kind == Scope::Kind::Messages;
+        if( !any ) return;
+
+        for( const auto& msg : m_worker.GetMessages() )
+        {
+            if( !InWindow( msg->time ) ) continue;
+            const char* text = m_worker.GetString( msg->ref );
+            const auto terms = TermsForName( m_opts, text );
+            if( terms.empty() || !AnyScopeOf( terms, Scope::Kind::Messages ) ) continue;
+            const auto tid = m_worker.DecompressThread( msg->thread );
+            m_rows.push_back( Row { "Message", nullptr, 0, msg->time, 0, int64_t( tid ), m_worker.GetThreadName( tid ), text, -1, RowKind::Message, kNoParent } );
+        }
+    }
+
     void Push( int16_t srcloc, int64_t start, int64_t duration, int64_t threadId, const char* threadName, RowKind kind, const char* value, int64_t parentStart )
     {
         const auto& sl = m_worker.GetSourceLocation( srcloc );
@@ -546,7 +576,8 @@ public:
         for( size_t g = 1; g < groups.size(); ++g )
         {
             if( groups[g].key != groups[g-1].key ) continue;
-            groups[g].key += rows[groups[g].begin].kind == RowKind::Gpu ? "@gpu" : "@frames";
+            const auto k = rows[groups[g].begin].kind;
+            groups[g].key += k == RowKind::Gpu ? "@gpu" : k == RowKind::Frame ? "@frames" : "@messages";
         }
 
         bool first = true;
@@ -698,6 +729,10 @@ Scope ParseScope( const char* spec )
     else if( EqualsIgnoreCase( spec, "frames" ) )
     {
         scope.kind = Scope::Kind::Frames;
+    }
+    else if( EqualsIgnoreCase( spec, "messages" ) )
+    {
+        scope.kind = Scope::Kind::Messages;
     }
     else
     {

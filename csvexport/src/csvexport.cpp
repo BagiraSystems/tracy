@@ -49,9 +49,10 @@ void print_usage_exit(int e)
     fprintf(stderr, "  -x, --export arg           Write per-event rows to arg, strings to arg.dict, and the\n");
     fprintf(stderr, "                             id -> name table of referenced threads / GPU contexts to arg.threads\n");
     fprintf(stderr, "                             (thread column = OS thread id, or GPU context index when gpu = 1)\n");
-    fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | frames | <thread name or id>\n");
+    fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | frames | messages | <thread name or id>\n");
     fprintf(stderr, "                             (frames = FrameMark frame sets; adds a numeric frame column holding\n");
-    fprintf(stderr, "                             the frame number the profiler shows, e.g. 41369, not a 0-based index)\n");
+    fprintf(stderr, "                             the frame number the profiler shows, e.g. 41369, not a 0-based index;\n");
+    fprintf(stderr, "                             messages = TracyMessage texts matched by NAME, text in the value column)\n");
     fprintf(stderr, "  -F, --filter-exact arg     Like -f, but NAME must match the whole zone name\n");
     fprintf(stderr, "  -T, --scope arg            Default scope for -f terms without @ (default: all)\n");
     fprintf(stderr, "  -L, --no-location          Omit src_file and src_line columns\n");

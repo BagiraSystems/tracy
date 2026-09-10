@@ -17,7 +17,7 @@ multiple event names, each with its own thread/GPU scope. Existing modes stay by
                         ("-f @gpu" = every GPU zone).
 -F NAME[@SCOPE]         Like -f, but NAME must equal the whole zone name. Mixable with -f.
 -T SCOPE                Default scope for terms without @, and for the no-filter case.
-                        SCOPE is all | cpu | gpu | frames | <thread>. Default: all.
+                        SCOPE is all | cpu | gpu | frames | messages | <thread>. Default: all.
 -L, --no-location       Drop src_file and src_line columns.
 -c, -e, -s              Unchanged meaning; honoured in -x mode.
 ```
@@ -108,7 +108,8 @@ A term splits at the first `@` into NAME and SCOPE. Missing SCOPE -> the `-T` de
   length, empty location and thread cells, and a numeric `frame` column - present only when a
   `frames` term is used, replacing `value` for frame groups in `columns` order - holding the
   frame number as the profiler shows it),
-  `gpu` (GPU only).
+  `gpu` (GPU only), `messages` (TracyMessage texts: NAME matches the text; one row per message
+  named `Message` with the text in `value`, the emitting thread, duration 0).
 - Any other SCOPE is a thread spec: all digits -> exact OS thread id; otherwise substring match
   on the thread name, case-insensitive unless `-c`.
 - `-f` NAME matches by substring, `-F` NAME by whole-name equality (both case-insensitive unless
