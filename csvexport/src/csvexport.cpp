@@ -60,7 +60,7 @@ void print_usage_exit(int e)
     fprintf(stderr, "  -n, --frames arg           Window length in frames\n");
     fprintf(stderr, "  -E, --end-frame arg        Last frame included in the window (alternative to -n), same numbering\n");
     fprintf(stderr, "  -P, --parent arg           Add a parent_ns_since_start column: start of the nearest enclosing\n");
-    fprintf(stderr, "                             GPU zone named exactly arg (join key to that zone's own row)\n");
+    fprintf(stderr, "                             GPU zone named exactly arg; rows of arg itself reference their own start\n");
     fprintf(stderr, "  -S, --seconds              Emit times as floating-point seconds instead of integer ns\n");
     fprintf(stderr, "  -o, --order arg            Row order: sequential (default) | interleaved | columns\n");
 

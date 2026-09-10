@@ -392,7 +392,10 @@ private:
                 const auto terms = TermsForName( m_opts, name );
                 if( !terms.empty() && AnyGpuScope( terms ) )
                 {
-                    Push( ev.SrcLoc(), ev.GpuStart(), ev.GpuEnd() - ev.GpuStart(), ctxIdx, ctxName, RowKind::Gpu, nullptr, parentStart );
+                    // A parent zone references itself, so one pivot key covers the parent's own
+                    // duration and its children's sums.
+                    const auto rowParent = IsParent( name ) ? ev.GpuStart() : parentStart;
+                    Push( ev.SrcLoc(), ev.GpuStart(), ev.GpuEnd() - ev.GpuStart(), ctxIdx, ctxName, RowKind::Gpu, nullptr, rowParent );
                 }
             }
             if( ev.Child() >= 0 )

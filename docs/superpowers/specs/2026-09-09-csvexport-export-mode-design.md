@@ -71,7 +71,8 @@ quotes and newlines in paths/texts survive. Written after the CSV is complete.
                         are an error, a count running past the last frame ends at the trace end.
 -P, --parent <name>     Add a parent_<start column> column: start of the nearest enclosing GPU
                         zone named exactly <name> (case per -c), same units and -z shift as the
-                        start column, so it joins to that zone's own row. Empty when there is no
+                        start column. Rows of <name> itself reference their own start, so one
+                        pivot key covers the parent duration and its children. Empty when there is no
                         such ancestor; CPU zones and frames never get one. Zones with a parent
                         follow the parent's window membership (a parent is exported with all its
                         children or not at all). In columns order every
