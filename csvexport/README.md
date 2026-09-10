@@ -169,7 +169,10 @@ cmake --build csvexport\build --config Release --target tracy-csvexport
 ```
 
 The binary is `csvexport\build\Release\tracy-csvexport.exe`; `tracy-csvexport -V` prints the
-Tracy version and the git revision it was built from. Traces saved by Tracy versions older than
+Tracy version, the git revision it was built from and the Bagira release
+(`tracy-csvexport 0.14.1 / <hash> / bagira.1`). Releases are tagged
+`tracy-csvexport-<tracy version>-bagira.<n>`, with a `...-win64.zip` asset holding the exe and
+this README. Traces saved by Tracy versions older than
 the one the tool is built against may not load (the worker rejects them without a message).
 
 ## Where things live

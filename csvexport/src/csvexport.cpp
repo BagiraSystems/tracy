@@ -22,9 +22,13 @@
 #include "GitRef.hpp"
 #include "Export.hpp"
 
+// Bagira release of this tool on top of the Tracy version above; bump with every tagged release
+// (tag: tracy-csvexport-<tracy version>-<this>).
+#define BAGIRA_CSVEXPORT_RELEASE "bagira.1"
+
 void print_usage_exit(int e)
 {
-    fprintf(stderr, "tracy-csvexport %i.%i.%i / %s\n\n", tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch, tracy::GitRef);
+    fprintf(stderr, "tracy-csvexport %i.%i.%i / %s / " BAGIRA_CSVEXPORT_RELEASE "\n\n", tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch, tracy::GitRef);
     fprintf(stderr, "Extract statistics from a trace to a CSV format\n");
     fprintf(stderr, "Usage:\n");
     fprintf(stderr, "  extract [OPTION...] <trace file>\n");
@@ -166,7 +170,7 @@ Args parse_args(int argc, char** argv)
             print_usage_exit(0);
             break;
         case 'V':
-            printf( "tracy-csvexport %i.%i.%i / %s\n", tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch, tracy::GitRef );
+            printf( "tracy-csvexport %i.%i.%i / %s / " BAGIRA_CSVEXPORT_RELEASE "\n", tracy::Version::Major, tracy::Version::Minor, tracy::Version::Patch, tracy::GitRef );
             exit( 0 );
         case 'f':
             args.filter = optarg;
