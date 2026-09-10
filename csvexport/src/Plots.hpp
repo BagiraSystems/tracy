@@ -37,11 +37,12 @@ struct PlotSeries
 bool HasPlotsTerm( const ExportOptions& opts );
 
 // Plots whose display name matches a plots-scoped term, with their samples inside the window,
-// in worker order and ascending in time.
+// in worker order and ascending in time; WritePlots applies the -o order.
 std::vector<PlotSeries> CollectPlots( const tracy::Worker& worker, const ExportOptions& opts, const Window& window );
 
-// Writes the .plots file; names and formats are interned in dict. Returns false if path cannot
-// be opened.
+// Writes the .plots file: one block per plot for the sequential and columns orders, one
+// time-ordered stream for interleaved. Names and formats are interned in dict, in the order the
+// rows are written. Returns false if path cannot be opened.
 bool WritePlots( const char* path, const std::vector<PlotSeries>& series, Dictionary& dict, const ExportOptions& opts );
 
 #endif

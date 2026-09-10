@@ -145,25 +145,54 @@ bool WritePlots( const char* path, const std::vector<PlotSeries>& series, Dictio
     const char* sep = opts.separator;
     fprintf( f, "name%sformat%s%s%svalue%sframe\n", sep, sep, opts.seconds ? "s_since_start" : "ns_since_start", sep, sep );
 
-    for( const auto& s : series )
+    // Dictionary indices are assigned as the rows are written, so they follow the chosen order
+    // exactly as they do for the zone rows.
+    auto writeRow = [&]( const PlotSeries& s, const PlotPoint& p )
     {
+        // Interned in two statements: the evaluation order of arguments in one call is
+        // unspecified, and it decides which of the two strings gets the lower index.
         const auto nameIdx = dict.Index( s.name.c_str() );
         const auto formatIdx = dict.Index( s.format );
-        for( const auto& p : s.points )
+        fprintf( f, "%u%s%u%s", nameIdx, sep, formatIdx, sep );
+        if( opts.seconds )
         {
-            fprintf( f, "%u%s%u%s", nameIdx, sep, formatIdx, sep );
-            if( opts.seconds )
-            {
-                fprintf( f, "%.9f", p.time / 1e9 );
-            }
-            else
-            {
-                fprintf( f, "%lld", (long long)p.time );
-            }
-            // %.15g keeps integral values integral and still round-trips fractions.
-            fprintf( f, "%s%.15g%s", sep, p.value, sep );
-            if( p.frame >= 0 ) fprintf( f, "%lld", (long long)p.frame );
-            fputc( '\n', f );
+            fprintf( f, "%.9f", p.time / 1e9 );
+        }
+        else
+        {
+            fprintf( f, "%lld", (long long)p.time );
+        }
+        // %.15g keeps integral values integral and still round-trips fractions.
+        fprintf( f, "%s%.15g%s", sep, p.value, sep );
+        if( p.frame >= 0 ) fprintf( f, "%lld", (long long)p.frame );
+        fputc( '\n', f );
+    };
+
+    if( opts.order == RowOrder::Interleaved )
+    {
+        // One time-ordered stream of every plot, the counterpart of the interleaved row order.
+        // Each plot's own samples are already ascending, so a stable sort by time keeps samples
+        // sharing a timestamp in worker order.
+        struct Ref { int64_t time; uint32_t series; uint32_t point; };
+        std::vector<Ref> refs;
+        size_t total = 0;
+        for( const auto& s : series ) total += s.points.size();
+        refs.reserve( total );
+        for( uint32_t i = 0; i < series.size(); ++i )
+        {
+            const auto& points = series[i].points;
+            for( uint32_t j = 0; j < points.size(); ++j ) refs.push_back( Ref { points[j].time, i, j } );
+        }
+        std::stable_sort( refs.begin(), refs.end(), []( const Ref& a, const Ref& b ) { return a.time < b.time; } );
+        for( const auto& r : refs ) writeRow( series[r.series], series[r.series].points[r.point] );
+    }
+    else
+    {
+        // sequential and columns: one block per plot, samples ascending. A column group per plot
+        // would pair unrelated samples in a row, so the flat layout is kept.
+        for( const auto& s : series )
+        {
+            for( const auto& p : s.points ) writeRow( s, p );
         }
     }
     fclose( f );

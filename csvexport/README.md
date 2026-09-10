@@ -167,8 +167,10 @@ Names are the profiler's lane headers, which is why the built-in plots come out 
 happens to sit at handle 0 — upstream's `-u -p` merges both of those into one bogus group.
 
 The window (`-b/-l`, `-B/-n/-E`), `-S` and `-z` apply as they do to rows, and `-z` uses one zero
-base for both files so their times stay comparable. `-L`, `-e`, `-P` and `-o` do not affect
-`.plots`; it has one fixed layout.
+base for both files so their times stay comparable. `-o interleaved` merges the plots into one
+time-ordered stream; `sequential` (the default) and `columns` write one block per plot, samples
+ascending — a column group per plot would put samples with unrelated timestamps in the same row.
+Samples sharing a timestamp keep their plot order. `-L`, `-e` and `-P` do not affect `.plots`.
 
 ### `columns` order
 
