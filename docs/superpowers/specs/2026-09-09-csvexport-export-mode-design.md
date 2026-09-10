@@ -59,8 +59,10 @@ quotes and newlines in paths/texts survive. Written after the CSV is complete.
 -b, --begin <sec>       Export only events starting at or after <sec> from the trace start
                         (the profiler's 0), measured on the event start. Default 0.
 -l, --length <sec>      Window length in seconds, from --begin. Default unbounded.
--B, --begin-frame <n>   Window starts at the begin of frame n of the main frame set (profiler
-                        numbering, as printed in the frame column). Default: first real frame.
+-B, --begin-frame <n>   Window starts at the begin of frame n of the main frame set. n is the
+                        frame number the profiler displays ("Frame 41369") and the frame column
+                        prints - not a 0-based index; on-demand traces start at a high number.
+                        Default: first real frame.
 -n, --frames <n>        Window length in frames.
 -E, --end-frame <n>     Last frame included; alternative to -n. The frame window (-B/-n/-E) is
                         exclusive with the time window (-b/-l); frame numbers outside the trace

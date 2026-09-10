@@ -44,16 +44,19 @@ void print_usage_exit(int e)
     fprintf(stderr, "Per-event export mode (mutually exclusive with -u, -g, -m, -p):\n");
     fprintf(stderr, "  -x, --export arg           Write per-event rows to arg, strings to arg.dict\n");
     fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | frames | <thread name or id>\n");
-    fprintf(stderr, "                             (frames = FrameMark frame sets; adds a numeric frame column)\n");
+    fprintf(stderr, "                             (frames = FrameMark frame sets; adds a numeric frame column holding\n");
+    fprintf(stderr, "                             the frame number the profiler shows, e.g. 41369, not a 0-based index)\n");
     fprintf(stderr, "  -F, --filter-exact arg     Like -f, but NAME must match the whole zone name\n");
     fprintf(stderr, "  -T, --scope arg            Default scope for -f terms without @ (default: all)\n");
     fprintf(stderr, "  -L, --no-location          Omit src_file and src_line columns\n");
     fprintf(stderr, "  -z, --zero                 Shift times so the earliest exported event starts at 0\n");
     fprintf(stderr, "  -b, --begin arg            Export only events starting arg seconds after the trace start\n");
     fprintf(stderr, "  -l, --length arg           Length of the exported window in seconds (default: unbounded)\n");
-    fprintf(stderr, "  -B, --begin-frame arg      Window starts at frame arg of the main frame set (profiler numbering)\n");
+    fprintf(stderr, "  -B, --begin-frame arg      Window starts at frame arg of the main frame set. Frame numbers are\n");
+    fprintf(stderr, "                             those shown in the profiler (\"Frame 41369\"), i.e. the frame column,\n");
+    fprintf(stderr, "                             not a 0-based index; the trace usually does not start at frame 0\n");
     fprintf(stderr, "  -n, --frames arg           Window length in frames\n");
-    fprintf(stderr, "  -E, --end-frame arg        Last frame included in the window (alternative to -n)\n");
+    fprintf(stderr, "  -E, --end-frame arg        Last frame included in the window (alternative to -n), same numbering\n");
     fprintf(stderr, "  -S, --seconds              Emit times as floating-point seconds instead of integer ns\n");
     fprintf(stderr, "  -o, --order arg            Row order: sequential (default) | interleaved | columns\n");
 
