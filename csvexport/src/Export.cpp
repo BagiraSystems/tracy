@@ -11,6 +11,8 @@
 
 #include "../../server/TracyWorker.hpp"
 #include "Export.hpp"
+#include "ExportCommon.hpp"
+#include "Plots.hpp"
 
 namespace
 {
@@ -37,51 +39,7 @@ bool IsAllDigits( const char* s )
     return true;
 }
 
-// Strings may contain the separator, quotes or newlines, so they are CSV-quoted when written.
-void WriteQuoted( FILE* f, const char* s )
-{
-    fputc( '"', f );
-    for( ; *s; ++s )
-    {
-        if( *s == '"' ) fputc( '"', f );
-        fputc( *s, f );
-    }
-    fputc( '"', f );
-}
-
-// Assigns each distinct string an index in first-seen order and writes them out as the .dict file.
-class Dictionary
-{
-public:
-    uint32_t Index( const char* s )
-    {
-        auto it = m_index.find( s );
-        if( it != m_index.end() ) return it->second;
-        const auto idx = uint32_t( m_strings.size() );
-        m_strings.emplace_back( s );
-        m_index.emplace( m_strings.back(), idx );
-        return idx;
-    }
-
-    bool Write( const char* path, const char* sep ) const
-    {
-        FILE* f = fopen( path, "wb" );
-        if( !f ) return false;
-        fprintf( f, "index%sstring\n", sep );
-        for( size_t i = 0; i < m_strings.size(); ++i )
-        {
-            fprintf( f, "%zu%s", i, sep );
-            WriteQuoted( f, m_strings[i].c_str() );
-            fputc( '\n', f );
-        }
-        fclose( f );
-        return true;
-    }
-
-private:
-    std::vector<std::string> m_strings;
-    std::unordered_map<std::string, uint32_t> m_index;
-};
+// Dictionary and WriteQuoted are shared with the plot export; see ExportCommon.hpp.
 
 // One exported zone occurrence. String pointers refer to worker-owned storage (or the
 // context-name pool in Collector), so they stay valid until the export finishes.
@@ -180,6 +138,7 @@ bool AnyCpuScope( const std::vector<const FilterTerm*>& terms, const tracy::Work
         case Scope::Kind::Gpu:
         case Scope::Kind::Frames:
         case Scope::Kind::Messages:
+        case Scope::Kind::Plots:
             break;
         }
     }
@@ -231,79 +190,6 @@ int64_t GetZoneChildTimeFast( const tracy::Worker& worker, const tracy::ZoneEven
         }
     }
     return time;
-}
-
-// Frame number of frame index i in the main frame set, as the profiler's View::GetFrameNumber.
-uint64_t FrameNumberBase( const tracy::Worker& worker, const tracy::FrameData& fd )
-{
-    if( &fd != worker.GetFramesBase() ) return 1;
-    const auto offset = worker.GetFrameOffset();
-    return offset == 0 ? 0 : offset - 1;
-}
-
-// Half-open [begin, end) time range selected by the -b/-l or -B/-n/-E options.
-struct Window
-{
-    int64_t begin = INT64_MIN;
-    int64_t end = INT64_MAX;
-};
-
-// Returns false with a message in err when a frame number is outside the trace.
-bool ResolveWindow( const tracy::Worker& worker, const ExportOptions& opts, Window& out, std::string& err )
-{
-    const auto first = worker.GetFirstTime();
-    if( opts.beginFrame < 0 && opts.frameCount < 0 && opts.endFrame < 0 )
-    {
-        // GPU timestamps may precede the first CPU event, so only an explicit -b bounds the start.
-        if( opts.beginSec > 0 ) out.begin = first + int64_t( opts.beginSec * 1e9 );
-        if( opts.lengthSec >= 0 ) out.end = first + int64_t( ( opts.beginSec + opts.lengthSec ) * 1e9 );
-        return true;
-    }
-
-    const auto& fd = *worker.GetFramesBase();
-    const auto count = int64_t( worker.GetFrameCount( fd ) );
-    const auto base = int64_t( FrameNumberBase( worker, fd ) );
-    // Placeholder frames before the trace start are not addressable, as in the profiler.
-    int64_t firstIdx = 0;
-    while( firstIdx < count && worker.GetFrameBegin( fd, firstIdx ) < first ) ++firstIdx;
-    if( firstIdx >= count )
-    {
-        err = "the trace has no frames";
-        return false;
-    }
-
-    auto checkFrame = [&]( int64_t number, const char* what ) -> bool
-    {
-        const auto idx = number - base;
-        if( idx < firstIdx || idx >= count )
-        {
-            err = std::string( what ) + " " + std::to_string( number ) + " is outside the trace (frames " + std::to_string( firstIdx + base ) + " to " + std::to_string( count - 1 + base ) + ")";
-            return false;
-        }
-        return true;
-    };
-
-    const auto beginIdx = opts.beginFrame >= 0 ? opts.beginFrame - base : firstIdx;
-    if( opts.beginFrame >= 0 && !checkFrame( opts.beginFrame, "begin frame" ) ) return false;
-    out.begin = worker.GetFrameBegin( fd, beginIdx );
-
-    if( opts.endFrame >= 0 )
-    {
-        if( !checkFrame( opts.endFrame, "end frame" ) ) return false;
-        if( opts.endFrame - base < beginIdx )
-        {
-            err = "end frame precedes begin frame";
-            return false;
-        }
-        out.end = worker.GetFrameEnd( fd, opts.endFrame - base );
-    }
-    else if( opts.frameCount >= 0 )
-    {
-        // A window past the last frame simply ends where the trace ends.
-        const auto lastIdx = std::min( beginIdx + opts.frameCount - 1, count - 1 );
-        out.end = opts.frameCount == 0 ? out.begin : worker.GetFrameEnd( fd, lastIdx );
-    }
-    return true;
 }
 
 // Gathers the matching zone occurrences from the worker into Row records.
@@ -705,6 +591,84 @@ private:
 
 }
 
+// Strings may contain the separator, quotes or newlines, so they are CSV-quoted when written.
+void WriteQuoted( FILE* f, const char* s )
+{
+    fputc( '"', f );
+    for( ; *s; ++s )
+    {
+        if( *s == '"' ) fputc( '"', f );
+        fputc( *s, f );
+    }
+    fputc( '"', f );
+}
+
+// Frame number of frame index i in the main frame set, as the profiler's View::GetFrameNumber.
+uint64_t FrameNumberBase( const tracy::Worker& worker, const tracy::FrameData& fd )
+{
+    if( &fd != worker.GetFramesBase() ) return 1;
+    const auto offset = worker.GetFrameOffset();
+    return offset == 0 ? 0 : offset - 1;
+}
+
+// Returns false with a message in err when a frame number is outside the trace.
+bool ResolveWindow( const tracy::Worker& worker, const ExportOptions& opts, Window& out, std::string& err )
+{
+    const auto first = worker.GetFirstTime();
+    if( opts.beginFrame < 0 && opts.frameCount < 0 && opts.endFrame < 0 )
+    {
+        // GPU timestamps may precede the first CPU event, so only an explicit -b bounds the start.
+        if( opts.beginSec > 0 ) out.begin = first + int64_t( opts.beginSec * 1e9 );
+        if( opts.lengthSec >= 0 ) out.end = first + int64_t( ( opts.beginSec + opts.lengthSec ) * 1e9 );
+        return true;
+    }
+
+    const auto& fd = *worker.GetFramesBase();
+    const auto count = int64_t( worker.GetFrameCount( fd ) );
+    const auto base = int64_t( FrameNumberBase( worker, fd ) );
+    // Placeholder frames before the trace start are not addressable, as in the profiler.
+    int64_t firstIdx = 0;
+    while( firstIdx < count && worker.GetFrameBegin( fd, firstIdx ) < first ) ++firstIdx;
+    if( firstIdx >= count )
+    {
+        err = "the trace has no frames";
+        return false;
+    }
+
+    auto checkFrame = [&]( int64_t number, const char* what ) -> bool
+    {
+        const auto idx = number - base;
+        if( idx < firstIdx || idx >= count )
+        {
+            err = std::string( what ) + " " + std::to_string( number ) + " is outside the trace (frames " + std::to_string( firstIdx + base ) + " to " + std::to_string( count - 1 + base ) + ")";
+            return false;
+        }
+        return true;
+    };
+
+    const auto beginIdx = opts.beginFrame >= 0 ? opts.beginFrame - base : firstIdx;
+    if( opts.beginFrame >= 0 && !checkFrame( opts.beginFrame, "begin frame" ) ) return false;
+    out.begin = worker.GetFrameBegin( fd, beginIdx );
+
+    if( opts.endFrame >= 0 )
+    {
+        if( !checkFrame( opts.endFrame, "end frame" ) ) return false;
+        if( opts.endFrame - base < beginIdx )
+        {
+            err = "end frame precedes begin frame";
+            return false;
+        }
+        out.end = worker.GetFrameEnd( fd, opts.endFrame - base );
+    }
+    else if( opts.frameCount >= 0 )
+    {
+        // A window past the last frame simply ends where the trace ends.
+        const auto lastIdx = std::min( beginIdx + opts.frameCount - 1, count - 1 );
+        out.end = opts.frameCount == 0 ? out.begin : worker.GetFrameEnd( fd, lastIdx );
+    }
+    return true;
+}
+
 bool IsSubstring( const char* term, const char* s, bool caseSensitive )
 {
     if( caseSensitive ) return std::string( s ).find( term ) != std::string::npos;
@@ -733,6 +697,10 @@ Scope ParseScope( const char* spec )
     else if( EqualsIgnoreCase( spec, "messages" ) )
     {
         scope.kind = Scope::Kind::Messages;
+    }
+    else if( EqualsIgnoreCase( spec, "plots" ) )
+    {
+        scope.kind = Scope::Kind::Plots;
     }
     else
     {
@@ -788,15 +756,28 @@ int RunExport( const tracy::Worker& worker, const ExportOptions& opts )
 
     Collector collector( worker, opts, window );
     auto& rows = collector.Run();
+    auto series = CollectPlots( worker, opts, window );
 
-    if( opts.zeroShift && !rows.empty() )
+    // Rows and plot samples share one zero base, so the two files stay comparable.
+    if( opts.zeroShift )
     {
         int64_t minStart = INT64_MAX;
         for( const auto& row : rows ) minStart = std::min( minStart, row.start );
-        for( auto& row : rows )
+        for( const auto& s : series )
         {
-            row.start -= minStart;
-            if( row.parentStart != kNoParent ) row.parentStart -= minStart;
+            if( !s.points.empty() ) minStart = std::min( minStart, s.points.front().time );
+        }
+        if( minStart != INT64_MAX )
+        {
+            for( auto& row : rows )
+            {
+                row.start -= minStart;
+                if( row.parentStart != kNoParent ) row.parentStart -= minStart;
+            }
+            for( auto& s : series )
+            {
+                for( auto& p : s.points ) p.time -= minStart;
+            }
         }
     }
 
@@ -821,6 +802,18 @@ int RunExport( const tracy::Worker& worker, const ExportOptions& opts )
         writer.WriteFlat( rows );
     }
     fclose( f );
+
+    // Plots go to their own file: numeric values, no thread, no location. Written after the CSV
+    // so the dictionary indices of an export without plots stay what they were.
+    if( HasPlotsTerm( opts ) )
+    {
+        const std::string plotsPath = std::string( opts.outputPath ) + ".plots";
+        if( !WritePlots( plotsPath.c_str(), series, dict, opts ) )
+        {
+            fprintf( stderr, "Could not open plots file %s\n", plotsPath.c_str() );
+            return 1;
+        }
+    }
 
     const std::string dictPath = std::string( opts.outputPath ) + ".dict";
     if( !dict.Write( dictPath.c_str(), opts.separator ) )

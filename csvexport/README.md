@@ -3,8 +3,8 @@
 `tracy-csvexport` is the command-line exporter from the [Tracy profiler](https://github.com/wolfpld/tracy).
 This fork keeps upstream's tool intact and adds a **per-event export mode (`-x`)** that writes
 one row per zone occurrence, with all strings replaced by dictionary indices, plus filters,
-time/frame windows, row layouts and parent attribution built for analysing large traces in
-Excel, pandas and similar tools.
+time/frame windows, row layouts, parent attribution and a plot export built for analysing large
+traces in Excel, pandas and similar tools.
 
 Base: upstream Tracy `v0.14.1` (+87 commits, `f60889e1`). Everything below the
 *Per-event export mode* heading of `tracy-csvexport --help` is Bagira's addition; the classic
@@ -21,9 +21,13 @@ tracy-csvexport.exe -x gpu.csv -F GPUFrame@gpu -f @gpu -P GPUFrame -B 41400 -n 2
 
 :: 3. Frame, GPUFrame and Tick side by side, one row per frame
 tracy-csvexport.exe -x view.csv -F Frame@frames -F GPUFrame@gpu -F "Tick@Main thread" -o columns -S -z -L trace.tracy
+
+:: 4. Every plot lane (memory usage, CPU usage, TracyPlot values), stamped with its frame
+tracy-csvexport.exe -x plots.csv -f @plots trace.tracy
 ```
 
-Each run writes `out.csv`, `out.csv.dict` (string table) and `out.csv.threads` (thread table).
+Each run writes `out.csv`, `out.csv.dict` (string table) and `out.csv.threads` (thread table),
+plus `out.csv.plots` when a `plots` term is used.
 
 ## Options of the `-x` mode
 
@@ -58,6 +62,7 @@ SCOPE says where the name is looked for:
 | `gpu` | GPU zones only |
 | `frames` | FrameMark frame sets (see *Frames*) |
 | `messages` | TracyMessage texts (see *Messages*); NAME matches the text |
+| `plots` | Plot lanes (see *Plots*); NAME matches the plot name, rows go to `<file>.plots` |
 | anything else | CPU zones on threads whose **name contains** the text, or whose **id equals** it when it is all digits (ids are listed in `.threads`) |
 
 Zone names are often C++ function names containing `::`, which is why `@` is the separator.
@@ -123,6 +128,19 @@ containing the separator survive.
 `id<sep>gpu<sep>name` for every thread and GPU context referenced by the exported rows, sorted by
 id. Thread names are not unique (a worker pool shares one name), which is why the CSV carries ids.
 
+### `<file>.plots`
+
+Written only when a `plots` term is used. `name<sep>format<sep>ns_since_start<sep>value<sep>frame`,
+one row per plot sample.
+
+| Column | Content |
+|---|---|
+| `name` | Dictionary index of the plot name as the profiler's lane header shows it. |
+| `format` | Dictionary index of `Number`, `Memory` (bytes), `Percentage` or `Watt` — the unit of `value`. |
+| `ns_since_start` / `s_since_start` | Sample time, same units and zero base as the CSV (`-S`, `-z`). |
+| `value` | The plot value; integral values print without a decimal point. |
+| `frame` | Frame of the main frame set holding the sample (profiler numbering), empty outside every frame. |
+
 ### Frames
 
 `-f @frames` / `-F Frame@frames` export FrameMark frame sets as rows: `name` is the frame set
@@ -136,6 +154,21 @@ before the trace start (present in on-demand captures) are skipped, as the profi
 `Message`, `value` is the text (dictionary index), `thread` the emitting thread, `exec_time` 0,
 `gpu` 0. The text is what NAME is matched against, so `-f "sensor@messages"` selects the sensor
 messages only. Combine with `-F Frame@frames` (or `-b/-l`, `-B/-n`) to place messages in frames.
+
+### Plots
+
+`-f @plots` exports every plot lane the profiler draws; `-f "memory@plots"` or
+`-F "Memory/RAM@plots"` select by plot name. Rows go to `<file>.plots`, never into the CSV: a
+plot sample has a numeric value and no thread, duration or source location, so mixing it into the
+zone rows would only add empty columns.
+
+Names are the profiler's lane headers, which is why the built-in plots come out as `Memory usage`
+(allocation tracking) and `CPU usage` (system time) rather than under the name of whatever string
+happens to sit at handle 0 — upstream's `-u -p` merges both of those into one bogus group.
+
+The window (`-b/-l`, `-B/-n/-E`), `-S` and `-z` apply as they do to rows, and `-z` uses one zero
+base for both files so their times stay comparable. `-L`, `-e`, `-P` and `-o` do not affect
+`.plots`; it has one fixed layout.
 
 ### `columns` order
 
@@ -166,6 +199,24 @@ Caveat: `-f @gpu` exports every nesting level, so a parent pass and its sub-pass
 counted and the column sum exceeds the frame length. Either export one level by name
 (`-F SSAO@gpu -F SSGI@gpu ...`) or sum only the passes you compare.
 
+## Recipe: plots per frame in Excel
+
+1. Export the plots of interest over the frames of interest:
+
+   ```bat
+   tracy-csvexport.exe -x plots.csv -f "memory@plots" -F "Memory/RAM@plots" -B 41400 -n 200 trace.tracy
+   ```
+
+2. Load `plots.csv.plots` and `plots.csv.dict` as two sheets.
+3. Insert a pivot table: **Rows** = `frame`, **Columns** = `name`, **Values** = Average (or Max)
+   of `value`. One row per frame, one column per plot — the same curves the profiler draws, now
+   aggregated per frame.
+4. Label the columns via `VLOOKUP` into the `.dict` sheet.
+
+Plots that Tracy samples more often than once per frame (the allocation-tracking `Memory usage`
+plot fires on every alloc and free) give many samples per frame, which is why the aggregation is
+Average or Max rather than Sum; per-frame plots give exactly one row per frame.
+
 ## Building
 
 Requires CMake >= 3.16, a C++20 compiler and Git (dependencies are fetched by CPM at configure
@@ -186,6 +237,9 @@ the one the tool is built against may not load (the worker rejects them without 
 ## Where things live
 
 - `csvexport/src/Export.hpp`, `Export.cpp` — the `-x` mode (filtering, collection, row layouts).
+- `csvexport/src/Plots.hpp`, `Plots.cpp` — the `plots` scope and the `.plots` file.
+- `csvexport/src/ExportCommon.hpp` — the dictionary, time window and frame numbering both share.
 - `csvexport/src/csvexport.cpp` — upstream's tool plus the option parsing for `-x`.
-- `docs/superpowers/specs/2026-09-09-csvexport-export-mode-design.md` — design notes and decisions.
+- `docs/superpowers/specs/2026-09-09-csvexport-export-mode-design.md`,
+  `docs/superpowers/specs/2026-09-10-csvexport-plots-scope-design.md` — design notes and decisions.
 - `manual/tracy.tex` — the upstream manual, extended with a subsection on this mode.

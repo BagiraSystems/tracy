@@ -46,13 +46,15 @@ void print_usage_exit(int e)
     fprintf(stderr, "  -t, --truncated_mean[=arg] Report truncated mean (arg is the percentile. Default is 90)\n");
     fprintf(stderr, "\n");
     fprintf(stderr, "Per-event export mode (mutually exclusive with -u, -g, -m, -p):\n");
-    fprintf(stderr, "  -x, --export arg           Write per-event rows to arg, strings to arg.dict, and the\n");
+    fprintf(stderr, "  -x, --export arg           Write per-event rows to arg, strings to arg.dict, plots to arg.plots, and the\n");
     fprintf(stderr, "                             id -> name table of referenced threads / GPU contexts to arg.threads\n");
     fprintf(stderr, "                             (thread column = OS thread id, or GPU context index when gpu = 1)\n");
-    fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | frames | messages | <thread name or id>\n");
+    fprintf(stderr, "  -f NAME[@SCOPE]            Repeatable; SCOPE is all | cpu | gpu | frames | messages | plots | <thread>\n");
     fprintf(stderr, "                             (frames = FrameMark frame sets; adds a numeric frame column holding\n");
     fprintf(stderr, "                             the frame number the profiler shows, e.g. 41369, not a 0-based index;\n");
-    fprintf(stderr, "                             messages = TracyMessage texts matched by NAME, text in the value column)\n");
+    fprintf(stderr, "                             messages = TracyMessage texts matched by NAME, text in the value column;\n");
+    fprintf(stderr, "                             plots = plot lanes matched by NAME, written to arg.plots as\n");
+    fprintf(stderr, "                             name, format, time, value, frame - not mixed into the CSV)\n");
     fprintf(stderr, "  -F, --filter-exact arg     Like -f, but NAME must match the whole zone name\n");
     fprintf(stderr, "  -T, --scope arg            Default scope for -f terms without @ (default: all)\n");
     fprintf(stderr, "  -L, --no-location          Omit src_file and src_line columns\n");

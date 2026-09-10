@@ -7,11 +7,11 @@
 
 namespace tracy { class Worker; }
 
-// Where a filter term looks. Frames are the FrameMark frame sets and Messages the TracyMessage
-// texts, neither of which are zones.
+// Where a filter term looks. Frames are the FrameMark frame sets, Messages the TracyMessage
+// texts and Plots the plot lanes, none of which are zones.
 struct Scope
 {
-    enum class Kind { All, Cpu, Gpu, Thread, Frames, Messages };
+    enum class Kind { All, Cpu, Gpu, Thread, Frames, Messages, Plots };
 
     Kind kind = Kind::All;
     // Kind::Thread only: either an exact OS thread id, or a substring of the thread name.
@@ -62,7 +62,8 @@ struct ExportOptions
 // Case-insensitive unless caseSensitive; matches when term is a substring of s.
 bool IsSubstring( const char* term, const char* s, bool caseSensitive );
 
-// Keywords "all", "cpu", "gpu", "frames", "messages" (case-insensitive); anything else is a thread spec.
+// Keywords "all", "cpu", "gpu", "frames", "messages", "plots" (case-insensitive); anything else is a
+// thread spec.
 Scope ParseScope( const char* spec );
 
 // Splits at the first '@'; a missing scope falls back to defaultScope.
@@ -71,7 +72,8 @@ FilterTerm ParseFilterTerm( const char* term, const Scope& defaultScope, bool ex
 // "sequential" | "interleaved" | "columns" (case-insensitive). Returns false on anything else.
 bool ParseRowOrder( const char* spec, RowOrder& out );
 
-// Writes the per-event CSV and its .dict companion. Returns the process exit code.
+// Writes the per-event CSV and its .dict, .threads and (with a plots term) .plots companions.
+// Returns the process exit code.
 int RunExport( const tracy::Worker& worker, const ExportOptions& opts );
 
 #endif

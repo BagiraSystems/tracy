@@ -21,6 +21,9 @@ set(PROGRAM_FILES
     src/csvexport.cpp
     src/Export.cpp
     src/Export.hpp
+    src/ExportCommon.hpp
+    src/Plots.cpp
+    src/Plots.hpp
 )
 
 add_executable(${PROJECT_NAME} ${PROGRAM_FILES} ${COMMON_FILES} ${SERVER_FILES})
