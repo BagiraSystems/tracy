@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.16)
 
 set(NO_STATISTICS OFF)
 
+# csvexport never captures live traces, so the capstone disassembler is dead
+# weight (roughly two thirds of the executable size).
+set(NO_DISASSEMBLY ON)
+
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/version.cmake)
 
 set(CMAKE_CXX_STANDARD 20)

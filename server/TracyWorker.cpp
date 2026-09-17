@@ -21,7 +21,9 @@
 #include <inttypes.h>
 #include <sys/stat.h>
 
-#include <capstone.h>
+#ifndef TRACY_NO_DISASSEMBLY
+#  include <capstone.h>
+#endif
 
 #define ZDICT_STATIC_LINKING_ONLY
 #include <zdict.h>
@@ -3990,6 +3992,7 @@ void Worker::AddSymbolCode( uint64_t ptr, const char* data, size_t sz )
     m_data.symbolCode.emplace( ptr, MemoryBlock{ code, uint32_t( sz ) } );
     m_data.symbolCodeSize += sz;
 
+#ifndef TRACY_NO_DISASSEMBLY
     if( m_data.cpuArch == CpuArchUnknown ) return;
     csh handle;
     cs_err rval = CS_ERR_ARCH;
@@ -4062,6 +4065,7 @@ void Worker::AddSymbolCode( uint64_t ptr, const char* data, size_t sz )
         cs_free( insn, cnt );
     }
     cs_close( &handle );
+#endif
 }
 
 
