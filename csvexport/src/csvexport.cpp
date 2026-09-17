@@ -24,7 +24,7 @@
 
 // Bagira release of this tool on top of the Tracy version above; bump with every tagged release
 // (tag: tracy-csvexport-<tracy version>-<this>).
-#define BAGIRA_CSVEXPORT_RELEASE "bagira.1"
+#define BAGIRA_CSVEXPORT_RELEASE "bagira.2"
 
 void print_usage_exit(int e)
 {
